@@ -38,6 +38,9 @@ openmind = "openmind.cli.main:app"
 [tool.uv]
 package = true
 
+[tool.hatch.build.targets.wheel]
+packages = ["openmind"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
