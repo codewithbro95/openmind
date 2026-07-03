@@ -298,7 +298,13 @@ class LMStudioClient:
     def health_check(self) -> bool: ...
     def list_models(self) -> list[LMStudioModel]: ...
     def load_model(self, model_key: str, context_length: int | None = None) -> dict: ...
-    def chat(self, model: str, messages: list[dict]) -> str: ...
+    def chat(self, model: str, messages: list[dict]) -> LMStudioChatResult: ...
+    def respond_with_reasoning(
+        self,
+        model: str,
+        messages: list[dict],
+        effort: str = "medium",
+    ) -> LMStudioChatResult: ...
     def embed(self, model: str, texts: list[str]) -> list[list[float]]: ...
 ```
 
@@ -310,7 +316,17 @@ Native REST API:
 OpenAI-compatible API:
 
 - `POST /v1/chat/completions`
+- `POST /v1/responses`
 - `POST /v1/embeddings`
+
+`openmind ask --show-thinking` uses the Responses endpoint with a `reasoning` payload and displays reasoning only when LM Studio returns explicit reasoning/thinking text. OpenMind also handles chat responses that expose fields such as `reasoning_content`, `thinking`, or a visible `<think>...</think>` block.
+
+`openmind ask` streams by default:
+
+- normal ask uses OpenAI-compatible `POST /v1/chat/completions` with `stream = true`
+- `--show-thinking` uses OpenAI-compatible `POST /v1/responses` with `stream = true`
+- `--no-stream` uses the previous full-response behavior
+- sources are appended after streaming finishes
 
 ## Indexing Flow
 
@@ -398,6 +414,31 @@ No Celery, Redis, external queue, or daemon manager is included in v0.2.
 Search and ask must catch provider errors and print concise CLI messages instead of Python tracebacks.
 
 For embedding requests, OpenMind uses LM Studio's OpenAI-compatible `POST /v1/embeddings` endpoint and normalizes newlines to spaces before sending input text.
+
+## Developer Logs
+
+OpenMind writes structured JSONL logs to:
+
+```text
+~/.openmind/logs/openmind.log
+```
+
+Index worker stdout/stderr is written to:
+
+```text
+~/.openmind/logs/index-<job-id>.log
+```
+
+CLI:
+
+```bash
+openmind dev logs
+openmind dev logs --no-follow --lines 40
+openmind dev logs --log all
+openmind dev logs --lm-studio
+```
+
+`--lm-studio` runs `lms log stream`, matching LM Studio's own development guidance for inspecting model input.
 
 ## Acceptance Tests
 

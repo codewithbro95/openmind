@@ -127,6 +127,26 @@ OpenMind ignores noisy or unsafe folders such as `.git`, `node_modules`, `venv`,
 
 `openmind ask` retrieves relevant chunks first. With LM Studio configured, it uses the selected embedding model for retrieval and selected chat model for the answer. If no chat model is configured, it returns the best retrieved context with sources instead of failing.
 
+Answers stream by default, so tokens appear as the model generates them:
+
+```bash
+openmind ask "What do my files say about the cabin trip?"
+```
+
+For a non-streaming response:
+
+```bash
+openmind ask "What do my files say about the cabin trip?" --no-stream
+```
+
+If the selected LM Studio model exposes thinking or reasoning text, show it with:
+
+```bash
+openmind ask "What do my files say about the cabin trip?" --show-thinking
+```
+
+If the model does not return explicit thinking/reasoning, OpenMind says that and still returns the answer with sources.
+
 ## Background Indexing
 
 ```bash
@@ -161,6 +181,46 @@ If a job stays in `pending` for more than a few seconds, the worker probably fai
 In v0.2, indexing requires LM Studio to be running because embeddings are created through the selected LM Studio embedding model.
 
 Search and ask also use the selected LM Studio embedding model. If LM Studio times out while generating embeddings, OpenMind exits with a short error message instead of a Python traceback.
+
+## Developer Logs
+
+OpenMind writes structured JSONL logs to:
+
+```text
+~/.openmind/logs/openmind.log
+```
+
+Index worker stdout/stderr logs are written to:
+
+```text
+~/.openmind/logs/index-<job-id>.log
+```
+
+Watch OpenMind logs:
+
+```bash
+openmind dev logs
+```
+
+Show recent logs once:
+
+```bash
+openmind dev logs --no-follow --lines 40
+```
+
+Watch all OpenMind logs:
+
+```bash
+openmind dev logs --log all
+```
+
+Watch LM Studio logs directly through its CLI:
+
+```bash
+openmind dev logs --lm-studio
+```
+
+That command runs `lms log stream`, which LM Studio recommends for inspecting model input during development.
 
 ## Test Data
 
