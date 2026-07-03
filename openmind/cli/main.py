@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.live import Live
 from rich.table import Table
 
 from openmind.core.config import (
@@ -155,12 +157,30 @@ def index_start() -> None:
 
 
 @index_app.command("status")
-def index_status() -> None:
-    job = engine().index_job_status()
+def index_status(
+    once: bool = typer.Option(False, "--once", help="Print the current status once and exit."),
+    refresh: float = typer.Option(1.0, min=0.2, help="Seconds between live status updates."),
+) -> None:
+    current = engine()
+    job = current.index_job_status()
     if job is None:
         console.print("[yellow]No indexing job has been started.[/yellow]")
         return
-    _print_index_job(job)
+    if once:
+        console.print(_index_job_table(job))
+        return
+
+    try:
+        with Live(_index_job_table(job), console=console, refresh_per_second=4) as live:
+            while True:
+                updated = current.index_job_status()
+                if updated is None:
+                    live.update("[yellow]No indexing job has been started.[/yellow]")
+                else:
+                    live.update(_index_job_table(updated))
+                time.sleep(refresh)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopped watching indexing status.[/yellow]")
 
 
 @index_app.command("pause")
@@ -230,7 +250,11 @@ def provider_status() -> None:
 
 @app.command("search")
 def search_command(query: str, limit: int = typer.Option(5, min=1, max=50)) -> None:
-    results = engine().search(query, limit=limit)
+    try:
+        results = engine().search(query, limit=limit)
+    except LMStudioError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
     if not results:
         console.print("[yellow]No matches found.[/yellow]")
         return
@@ -243,7 +267,11 @@ def search_command(query: str, limit: int = typer.Option(5, min=1, max=50)) -> N
 
 @app.command("ask")
 def ask_command(question: str, limit: int = typer.Option(5, min=1, max=20)) -> None:
-    console.print(engine().ask(question, limit=limit))
+    try:
+        console.print(engine().ask(question, limit=limit))
+    except LMStudioError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
 
 
 @app.command("status")
@@ -346,6 +374,10 @@ def _print_models(title: str, models: list[LMStudioModel]) -> None:
 
 
 def _print_index_job(job: IndexJob) -> None:
+    console.print(_index_job_table(job))
+
+
+def _index_job_table(job: IndexJob) -> Table:
     table = Table(title="Indexing Status")
     table.add_column("Metric")
     table.add_column("Value")
@@ -361,7 +393,7 @@ def _print_index_job(job: IndexJob) -> None:
     table.add_row("Current file", job.current_file or "")
     if job.error:
         table.add_row("Error", job.error)
-    console.print(table)
+    return table
 
 
 if __name__ == "__main__":

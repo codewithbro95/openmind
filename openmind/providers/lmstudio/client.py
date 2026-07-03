@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import urllib.error
 import urllib.request
 from typing import Any
@@ -15,7 +16,7 @@ class LMStudioClient:
         self,
         base_url: str = "http://localhost:1234",
         api_token: str | None = None,
-        timeout: float = 10.0,
+        timeout: float = 120.0,
     ):
         self.base_url = base_url.rstrip("/")
         self.api_token = api_token or os.environ.get("LM_API_TOKEN")
@@ -67,7 +68,8 @@ class LMStudioClient:
     def embed(self, model: str, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        data = self._request("POST", "/v1/embeddings", {"model": model, "input": texts})
+        normalized_texts = [text.replace("\n", " ") for text in texts]
+        data = self._request("POST", "/v1/embeddings", {"model": model, "input": normalized_texts})
         embeddings = []
         for item in data.get("data", []):
             embeddings.append([float(value) for value in item["embedding"]])
@@ -88,13 +90,17 @@ class LMStudioClient:
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             raise LMStudioModelError(f"LM Studio API error {exc.code}: {detail}") from exc
+        except (TimeoutError, socket.timeout) as exc:
+            raise LMStudioConnectionError(
+                f"Timed out waiting for LM Studio at {self.base_url}. "
+                "If the model is still loading, wait a moment and retry. "
+                "You can also run: openmind models load"
+            ) from exc
         except urllib.error.URLError as exc:
             raise LMStudioConnectionError(
                 f"LM Studio is not reachable at {self.base_url}. "
                 "Start it from the LM Studio Developer tab or run: lms server start"
             ) from exc
-        except TimeoutError as exc:
-            raise LMStudioConnectionError(f"Timed out connecting to LM Studio at {self.base_url}") from exc
 
         if not raw:
             return {}

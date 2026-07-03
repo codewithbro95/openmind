@@ -1,4 +1,5 @@
 import json
+import socket
 import urllib.error
 
 import pytest
@@ -84,6 +85,18 @@ def test_lmstudio_client_reports_unreachable(monkeypatch):
         LMStudioClient().list_models()
 
     assert "lms server start" in str(exc.value)
+
+
+def test_lmstudio_client_reports_timeout(monkeypatch):
+    def fake_urlopen(request, timeout):
+        raise socket.timeout("timed out")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    with pytest.raises(LMStudioConnectionError) as exc:
+        LMStudioClient(timeout=0.1).embed("nomic", ["holiday\nplan"])
+
+    assert "Timed out waiting for LM Studio" in str(exc.value)
 
 
 def test_lmstudio_answer_returns_unreachable_message():
