@@ -142,7 +142,13 @@ Indexing has two phases:
 1. Discovery: scan enabled sources and count supported files.
 2. Indexing: extract, chunk, embed, and store chunks while updating SQLite progress.
 
-`openmind index status` shows discovered files, processed files, indexed/skipped/failed counts, chunks created, current file, and progress percentage.
+`openmind index status` shows a live table with discovered files, processed files, indexed/skipped/failed counts, chunks created, current file, and progress percentage. It keeps refreshing until you press `Ctrl-C`.
+
+For a one-shot status check:
+
+```bash
+openmind index status --once
+```
 
 If a job stays in `pending` for more than a few seconds, the worker probably failed before it could update SQLite. Worker logs are written under:
 
@@ -151,6 +157,8 @@ If a job stays in `pending` for more than a few seconds, the worker probably fai
 ```
 
 In v0.2, indexing requires LM Studio to be running because embeddings are created through the selected LM Studio embedding model.
+
+Search and ask also use the selected LM Studio embedding model. If LM Studio times out while generating embeddings, OpenMind exits with a short error message instead of a Python traceback.
 
 ## Test Data
 

@@ -362,7 +362,11 @@ The worker accepts `--job-id` and writes stdout/stderr to:
 
 If a job remains `pending` for more than 30 seconds, a later `openmind index start` marks it failed and creates a new job.
 
-`openmind index status` reads SQLite and reports:
+`openmind index status` reads SQLite and displays a live Rich table until the user exits with `Ctrl-C`.
+
+`openmind index status --once` prints one snapshot and exits.
+
+The status table reports:
 
 - state
 - total files
@@ -381,6 +385,12 @@ processed_files / total_files * 100
 ```
 
 No Celery, Redis, external queue, or daemon manager is included in v0.2.
+
+## LM Studio Failure Handling
+
+Search and ask must catch provider errors and print concise CLI messages instead of Python tracebacks.
+
+For embedding requests, OpenMind uses LM Studio's OpenAI-compatible `POST /v1/embeddings` endpoint and normalizes newlines to spaces before sending input text.
 
 ## Acceptance Tests
 
