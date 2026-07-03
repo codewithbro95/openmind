@@ -5,9 +5,11 @@ import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime
 
 from openmind.core.config import AppPaths, OpenMindConfig
+from openmind.core.logging import append_log
 from openmind.core.models import Document, IndexJob, IndexSummary, SearchResult, Source, StatusSummary
 from openmind.embeddings.provider import EmbeddingProvider, SentenceTransformerEmbeddingProvider
 from openmind.extractors import ExtractorRegistry, default_registry
@@ -114,6 +116,7 @@ class OpenMindEngine:
         env = os.environ.copy()
         env["OPENMIND_HOME"] = str(self.paths.home)
         log_path = self.paths.logs_path / f"index-{job.id}.log"
+        self._log("index.start", "Starting background index worker", job_id=job.id)
         log_file = log_path.open("a", encoding="utf-8")
         subprocess.Popen(
             [sys.executable, "-m", "openmind.cli.main", "index", "worker", "--job-id", job.id],
@@ -132,6 +135,7 @@ class OpenMindEngine:
             raise KeyError(f"Unknown index job: {job_id}")
 
         try:
+            self._log("index.worker.start", "Index worker started", job_id=job_id)
             self.sqlite.update_index_job(
                 job_id,
                 status="discovering",
@@ -146,11 +150,18 @@ class OpenMindEngine:
                 completed_at=None,
             )
             records = self.discover_files()
+            self._log(
+                "index.discovery.complete",
+                "File discovery complete",
+                job_id=job_id,
+                total_files=len(records),
+            )
             self.sqlite.update_index_job(job_id, total_files=len(records), status="running")
 
             for file_record in records:
                 job = self.sqlite.get_index_job(job_id)
                 if job and job.status == "stop_requested":
+                    self._log("index.worker.stopped", "Index worker stopped", job_id=job_id)
                     return self.sqlite.update_index_job(
                         job_id,
                         status="stopped",
@@ -159,10 +170,12 @@ class OpenMindEngine:
                     )
 
                 while job and job.status in {"pause_requested", "paused"}:
+                    self._log("index.worker.paused", "Index worker paused", job_id=job_id)
                     self.sqlite.update_index_job(job_id, status="paused")
                     time.sleep(1)
                     job = self.sqlite.get_index_job(job_id)
                     if job and job.status == "stop_requested":
+                        self._log("index.worker.stopped", "Index worker stopped", job_id=job_id)
                         return self.sqlite.update_index_job(
                             job_id,
                             status="stopped",
@@ -171,7 +184,24 @@ class OpenMindEngine:
                         )
 
                 self.sqlite.update_index_job(job_id, status="running", current_file=file_record.path)
+                self._log(
+                    "index.file.start",
+                    "Indexing file",
+                    job_id=job_id,
+                    path=file_record.path,
+                    extension=file_record.extension,
+                )
                 summary = self._index_file(file_record)
+                self._log(
+                    "index.file.finish",
+                    "Finished file",
+                    job_id=job_id,
+                    path=file_record.path,
+                    indexed=summary.files_indexed,
+                    skipped=summary.files_skipped,
+                    failed=summary.errors,
+                    chunks=summary.chunks_created,
+                )
                 current = self.sqlite.get_index_job(job_id)
                 processed = (current.processed_files if current else 0) + 1
                 self.sqlite.update_index_job(
@@ -183,6 +213,7 @@ class OpenMindEngine:
                     total_chunks=(current.total_chunks if current else 0) + summary.chunks_created,
                 )
 
+            self._log("index.worker.complete", "Index worker completed", job_id=job_id)
             return self.sqlite.update_index_job(
                 job_id,
                 status="completed",
@@ -190,6 +221,7 @@ class OpenMindEngine:
                 current_file=None,
             )
         except Exception as exc:
+            self._log("index.worker.failed", "Index worker failed", job_id=job_id, error=str(exc))
             return self.sqlite.update_index_job(
                 job_id,
                 status="failed",
@@ -230,11 +262,33 @@ class OpenMindEngine:
 
     def search(self, query: str, limit: int = 5) -> list[SearchResult]:
         self.init()
-        return SearchService(self.embeddings, self.lance).search(query, limit=limit)
+        self._log("search.start", "Searching local memory", query=query, limit=limit)
+        results = SearchService(self.embeddings, self.lance).search(query, limit=limit)
+        self._log("search.finish", "Search finished", query=query, results=len(results))
+        return results
 
-    def ask(self, question: str, limit: int = 5) -> str:
+    def ask(self, question: str, limit: int = 5, show_thinking: bool = False) -> str:
+        self._log("ask.start", "Answering question", question=question, limit=limit)
         results = self.search(question, limit=limit)
-        return self.answer_provider.answer(question, results)
+        answer = self.answer_provider.answer(question, results, show_thinking=show_thinking)
+        self._log("ask.finish", "Answer finished", question=question, sources=len(results))
+        return answer
+
+    def ask_stream(
+        self,
+        question: str,
+        limit: int = 5,
+        show_thinking: bool = False,
+    ) -> Iterator[str]:
+        self._log("ask.start", "Streaming answer", question=question, limit=limit)
+        results = self.search(question, limit=limit)
+        for chunk in self.answer_provider.stream_answer(
+            question,
+            results,
+            show_thinking=show_thinking,
+        ):
+            yield chunk
+        self._log("ask.finish", "Streaming answer finished", question=question, sources=len(results))
 
     def status(self) -> StatusSummary:
         self.init()
@@ -340,6 +394,9 @@ class OpenMindEngine:
         if updated_at.tzinfo is None:
             updated_at = updated_at.replace(tzinfo=UTC)
         return (datetime.now(UTC) - updated_at).total_seconds() > 30
+
+    def _log(self, event: str, message: str, **fields) -> None:
+        append_log(self.paths, event, message, **fields)
 
 
 class PathLike:
