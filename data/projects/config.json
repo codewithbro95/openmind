@@ -1,0 +1,16 @@
+{
+  "project": "OpenMind",
+  "mode": "local-first",
+  "provider": "LM Studio",
+  "features": [
+    "index",
+    "search",
+    "ask",
+    "sources"
+  ],
+  "demo_queries": [
+    "What do I know about the cabin trip?",
+    "Explain my FleetPulse project from my local files.",
+    "What OAuth problems did I write down?"
+  ]
+}

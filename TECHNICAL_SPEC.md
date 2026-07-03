@@ -354,6 +354,14 @@ openmind index worker --job-id <id>
 
 as a background subprocess.
 
+The worker accepts `--job-id` and writes stdout/stderr to:
+
+```text
+~/.openmind/logs/index-<job-id>.log
+```
+
+If a job remains `pending` for more than 30 seconds, a later `openmind index start` marks it failed and creates a new job.
+
 `openmind index status` reads SQLite and reports:
 
 - state

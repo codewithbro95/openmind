@@ -191,7 +191,7 @@ def index_stop() -> None:
 
 
 @index_app.command("worker", hidden=True)
-def index_worker(job_id: str) -> None:
+def index_worker(job_id: str = typer.Option(..., "--job-id")) -> None:
     final_job = engine().run_index_worker(job_id)
     console.print(f"Index worker finished with status: {final_job.status}")
 
