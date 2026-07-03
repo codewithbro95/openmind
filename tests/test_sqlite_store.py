@@ -32,3 +32,26 @@ def test_sqlite_store_initializes_sources_and_files(tmp_path):
     assert store.list_sources() == [source]
     assert store.file_by_path(str(tmp_path / "notes.md")).status == "indexed"
     assert store.status(app_home=str(tmp_path)).indexed_files == 1
+
+
+def test_sqlite_store_tracks_index_jobs(tmp_path):
+    store = SQLiteStore(tmp_path / "openmind.sqlite")
+    store.initialize()
+
+    job = store.create_index_job("job_1")
+    assert job.status == "pending"
+
+    updated = store.update_index_job(
+        "job_1",
+        status="running",
+        total_files=10,
+        processed_files=4,
+        indexed_files=3,
+        skipped_files=1,
+        total_chunks=12,
+        current_file="/tmp/note.md",
+    )
+
+    assert updated.progress_percent == 40.0
+    assert store.latest_index_job().id == "job_1"
+    assert store.latest_active_index_job().status == "running"

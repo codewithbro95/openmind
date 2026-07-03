@@ -1,4 +1,4 @@
-# OpenMind Core v0.1 Technical Spec
+# OpenMind Core v0.2 Technical Spec
 
 ## Goal
 
@@ -15,6 +15,8 @@ OpenMind Core v0.1 must:
 - Search indexed chunks and return file path, score, and snippet.
 - Ask questions by retrieving chunks and returning a source-grounded answer.
 - Store all app data under `~/.openmind` unless `OPENMIND_HOME` is set.
+- Use LM Studio as the first and only user-facing LLM and embedding provider.
+- Provide first-run setup and background indexing progress.
 
 ## Folder Structure
 
@@ -43,6 +45,13 @@ openmind-core/
 │   │   └── chunker.py
 │   ├── embeddings/
 │   │   └── provider.py
+│   ├── providers/
+│   │   └── lmstudio/
+│   │       ├── client.py
+│   │       ├── llm.py
+│   │       ├── embeddings.py
+│   │       ├── models.py
+│   │       └── errors.py
 │   ├── storage/
 │   │   ├── sqlite_store.py
 │   │   └── lance_store.py
@@ -148,6 +157,26 @@ CREATE TABLE index_runs (
 );
 ```
 
+### `index_jobs`
+
+```sql
+CREATE TABLE index_jobs (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    total_files INTEGER DEFAULT 0,
+    processed_files INTEGER DEFAULT 0,
+    indexed_files INTEGER DEFAULT 0,
+    skipped_files INTEGER DEFAULT 0,
+    failed_files INTEGER DEFAULT 0,
+    total_chunks INTEGER DEFAULT 0,
+    current_file TEXT,
+    error TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    updated_at TEXT
+);
+```
+
 ## LanceDB Schema
 
 Table: `chunks`
@@ -172,14 +201,57 @@ Columns:
 ## CLI Commands
 
 ```bash
+openmind setup
 openmind init
 openmind source add <path>
 openmind source list
 openmind source remove <id>
 openmind index
+openmind index start
+openmind index status
+openmind index pause
+openmind index resume
+openmind index stop
+openmind models list
+openmind models load
+openmind provider status
 openmind search "<query>" --limit 5
 openmind ask "<question>" --limit 5
 openmind status
+```
+
+## Setup Flow
+
+`openmind setup` must:
+
+1. Initialize `~/.openmind` if needed.
+2. Check LM Studio at `http://localhost:1234`.
+3. Present provider selection with LM Studio as the only v0.2 option.
+4. Fetch `GET /api/v1/models`.
+5. Split models by `type`: `llm` for chat and `embedding` for embeddings.
+6. Ask the user to choose one chat model when available.
+7. Require one embedding model.
+8. Load selected models with `POST /api/v1/models/load`.
+9. Save config to `~/.openmind/config.toml`.
+10. Ask which folders to index.
+11. Start background indexing.
+12. Tell the user to run `openmind index status`.
+
+## Config Format
+
+```toml
+[provider]
+name = "lmstudio"
+base_url = "http://localhost:1234"
+api_token_env = "LM_API_TOKEN"
+
+[models]
+chat_model = "selected-chat-model-key"
+embedding_model = "selected-embedding-model-key"
+
+[indexing]
+auto_start_after_setup = true
+background = true
 ```
 
 ## Core Interfaces
@@ -198,20 +270,44 @@ class AnswerProvider:
     def answer(self, question: str, context: list[SearchResult]) -> str: ...
 ```
 
+## LM Studio Provider
+
+`LMStudioClient`:
+
+```python
+class LMStudioClient:
+    def health_check(self) -> bool: ...
+    def list_models(self) -> list[LMStudioModel]: ...
+    def load_model(self, model_key: str, context_length: int | None = None) -> dict: ...
+    def chat(self, model: str, messages: list[dict]) -> str: ...
+    def embed(self, model: str, texts: list[str]) -> list[list[float]]: ...
+```
+
+Native REST API:
+
+- `GET /api/v1/models`
+- `POST /api/v1/models/load`
+
+OpenAI-compatible API:
+
+- `POST /v1/chat/completions`
+- `POST /v1/embeddings`
+
 ## Indexing Flow
 
 1. Load enabled sources from SQLite.
-2. Scan each source recursively.
+2. Discovery phase: scan each source recursively and count supported files.
 3. Ignore unsupported files and noisy folders.
-4. Compute file metadata and content hash.
+4. Indexing phase: compute metadata and content hash.
 5. Skip unchanged files that were already indexed.
 6. Extract text with the matching extractor.
 7. Normalize text.
 8. Split text into chunks.
-9. Embed chunks.
+9. Embed chunks with the selected LM Studio embedding model.
 10. Delete old vectors for the file from LanceDB.
 11. Store new chunks in LanceDB.
 12. Upsert file status in SQLite.
+13. Update `index_jobs` progress after each file.
 
 ## Search Flow
 
@@ -219,15 +315,45 @@ class AnswerProvider:
 2. Search LanceDB `chunks`.
 3. Return top results with score, file path, title, chunk text snippet, and metadata.
 
-Search must work without an LLM provider.
+Search requires an embedding provider. In v0.2, normal setup uses LM Studio embeddings.
 
 ## Ask Flow
 
 1. Run the search flow for the question.
 2. Build a compact context from retrieved chunks.
-3. If an answer provider is configured, generate an answer grounded only in context.
+3. If an LM Studio chat model is configured, generate an answer grounded only in context.
 4. If no answer provider is configured, return the top retrieved context and sources.
 5. Always show sources.
+
+## Background Indexing
+
+`openmind index start` creates an `index_jobs` row and starts:
+
+```bash
+openmind index worker --job-id <id>
+```
+
+as a background subprocess.
+
+`openmind index status` reads SQLite and reports:
+
+- state
+- total files
+- processed files
+- indexed files
+- skipped files
+- failed files
+- chunks created
+- progress percentage
+- current file
+
+Progress formula:
+
+```text
+processed_files / total_files * 100
+```
+
+No Celery, Redis, external queue, or daemon manager is included in v0.2.
 
 ## Acceptance Tests
 
@@ -242,3 +368,7 @@ The first acceptable build must prove:
 - SQLite file records can be inserted and updated.
 - Search service can return ranked results with a fake embedding provider and fake vector store.
 - Ask mode returns source-grounded context if no LLM provider is configured.
+- LM Studio client can list and load models with mocked API responses.
+- Config can save and load selected provider/model settings.
+- SQLite can create and update indexing job status.
+- LM Studio ask returns a clear message when the server is unreachable.

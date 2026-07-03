@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterator
 
-from openmind.core.models import FileRecord, Source, StatusSummary
+from openmind.core.models import FileRecord, IndexJob, Source, StatusSummary
 
 
 def utc_now() -> str:
@@ -63,6 +63,22 @@ class SQLiteStore:
                   files_indexed INTEGER NOT NULL DEFAULT 0,
                   files_skipped INTEGER NOT NULL DEFAULT 0,
                   errors INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS index_jobs (
+                  id TEXT PRIMARY KEY,
+                  status TEXT NOT NULL,
+                  total_files INTEGER DEFAULT 0,
+                  processed_files INTEGER DEFAULT 0,
+                  indexed_files INTEGER DEFAULT 0,
+                  skipped_files INTEGER DEFAULT 0,
+                  failed_files INTEGER DEFAULT 0,
+                  total_chunks INTEGER DEFAULT 0,
+                  current_file TEXT,
+                  error TEXT,
+                  started_at TEXT,
+                  completed_at TEXT,
+                  updated_at TEXT
                 );
                 """
             )
@@ -168,6 +184,70 @@ class SQLiteStore:
             app_home=app_home,
         )
 
+    def create_index_job(self, job_id: str) -> IndexJob:
+        now = utc_now()
+        job = IndexJob(id=job_id, status="pending", started_at=now, updated_at=now)
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO index_jobs (
+                  id, status, total_files, processed_files, indexed_files,
+                  skipped_files, failed_files, total_chunks, current_file,
+                  error, started_at, completed_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                self._job_values(job),
+            )
+        return job
+
+    def update_index_job(self, job_id: str, **updates: object) -> IndexJob:
+        if not updates:
+            job = self.get_index_job(job_id)
+            if job is None:
+                raise KeyError(f"Unknown index job: {job_id}")
+            return job
+        updates["updated_at"] = utc_now()
+        assignments = ", ".join(f"{key} = ?" for key in updates)
+        values = list(updates.values())
+        values.append(job_id)
+        with self.connect() as conn:
+            conn.execute(f"UPDATE index_jobs SET {assignments} WHERE id = ?", values)
+        job = self.get_index_job(job_id)
+        if job is None:
+            raise KeyError(f"Unknown index job: {job_id}")
+        return job
+
+    def get_index_job(self, job_id: str) -> IndexJob | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM index_jobs WHERE id = ?", (job_id,)).fetchone()
+        if row is None:
+            return None
+        return self._job_from_row(row)
+
+    def latest_index_job(self) -> IndexJob | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM index_jobs ORDER BY updated_at DESC, started_at DESC LIMIT 1"
+            ).fetchone()
+        if row is None:
+            return None
+        return self._job_from_row(row)
+
+    def latest_active_index_job(self) -> IndexJob | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM index_jobs
+                WHERE status IN ('pending', 'discovering', 'running', 'pause_requested', 'paused')
+                ORDER BY updated_at DESC, started_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        if row is None:
+            return None
+        return self._job_from_row(row)
+
     def _file_from_row(self, row: sqlite3.Row) -> FileRecord:
         return FileRecord(
             id=row["id"],
@@ -181,4 +261,38 @@ class SQLiteStore:
             status=row["status"],
             indexed_at=row["indexed_at"],
             error=row["error"],
+        )
+
+    def _job_values(self, job: IndexJob) -> tuple[object, ...]:
+        return (
+            job.id,
+            job.status,
+            job.total_files,
+            job.processed_files,
+            job.indexed_files,
+            job.skipped_files,
+            job.failed_files,
+            job.total_chunks,
+            job.current_file,
+            job.error,
+            job.started_at,
+            job.completed_at,
+            job.updated_at,
+        )
+
+    def _job_from_row(self, row: sqlite3.Row) -> IndexJob:
+        return IndexJob(
+            id=row["id"],
+            status=row["status"],
+            total_files=row["total_files"],
+            processed_files=row["processed_files"],
+            indexed_files=row["indexed_files"],
+            skipped_files=row["skipped_files"],
+            failed_files=row["failed_files"],
+            total_chunks=row["total_chunks"],
+            current_file=row["current_file"],
+            error=row["error"],
+            started_at=row["started_at"],
+            completed_at=row["completed_at"],
+            updated_at=row["updated_at"],
         )
