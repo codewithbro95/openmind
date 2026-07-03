@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 
 from openmind.core.models import SearchResult
 from openmind.retrieval.context import build_context, format_sources
@@ -8,12 +9,30 @@ from openmind.retrieval.context import build_context, format_sources
 
 class AnswerProvider(ABC):
     @abstractmethod
-    def answer(self, question: str, context: list[SearchResult]) -> str:
+    def answer(
+        self,
+        question: str,
+        context: list[SearchResult],
+        show_thinking: bool = False,
+    ) -> str:
         raise NotImplementedError
+
+    def stream_answer(
+        self,
+        question: str,
+        context: list[SearchResult],
+        show_thinking: bool = False,
+    ) -> Iterator[str]:
+        yield self.answer(question, context, show_thinking=show_thinking)
 
 
 class ContextOnlyAnswerProvider(AnswerProvider):
-    def answer(self, question: str, context: list[SearchResult]) -> str:
+    def answer(
+        self,
+        question: str,
+        context: list[SearchResult],
+        show_thinking: bool = False,
+    ) -> str:
         if not context:
             return "I did not find any indexed documents that match this question."
 

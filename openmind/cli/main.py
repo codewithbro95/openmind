@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import shutil
 import sqlite3
+import subprocess
 import time
 from pathlib import Path
 
@@ -26,10 +29,12 @@ source_app = typer.Typer(help="Manage user-approved folders.")
 index_app = typer.Typer(help="Index local files.")
 models_app = typer.Typer(help="Manage LM Studio models.")
 provider_app = typer.Typer(help="Inspect provider status.")
+dev_app = typer.Typer(help="Developer tools.")
 app.add_typer(source_app, name="source")
 app.add_typer(index_app, name="index")
 app.add_typer(models_app, name="models")
 app.add_typer(provider_app, name="provider")
+app.add_typer(dev_app, name="dev")
 console = Console()
 
 
@@ -257,6 +262,34 @@ def provider_status() -> None:
     console.print(f"[{color}]{message}[/{color}]")
 
 
+@dev_app.command("logs")
+def dev_logs(
+    follow: bool = typer.Option(True, "--follow/--no-follow", help="Keep watching for new log lines."),
+    lines: int = typer.Option(80, min=1, max=1000, help="Number of recent lines to show first."),
+    log: str = typer.Option(
+        "openmind",
+        "--log",
+        help="Which OpenMind log to show: openmind, index, or all.",
+    ),
+    lm_studio: bool = typer.Option(
+        False,
+        "--lm-studio",
+        help="Run LM Studio's `lms log stream` instead of OpenMind log files.",
+    ),
+) -> None:
+    if lm_studio:
+        _stream_lmstudio_logs()
+        return
+
+    current = engine()
+    current.init()
+    log_files = _select_log_files(current.paths.logs_path, log)
+    if not log_files:
+        console.print(f"[yellow]No log files found in {current.paths.logs_path}[/yellow]")
+        return
+    _tail_log_files(log_files, lines=lines, follow=follow)
+
+
 @app.command("search")
 def search_command(query: str, limit: int = typer.Option(5, min=1, max=50)) -> None:
     try:
@@ -275,9 +308,28 @@ def search_command(query: str, limit: int = typer.Option(5, min=1, max=50)) -> N
 
 
 @app.command("ask")
-def ask_command(question: str, limit: int = typer.Option(5, min=1, max=20)) -> None:
+def ask_command(
+    question: str,
+    limit: int = typer.Option(5, min=1, max=20),
+    stream: bool = typer.Option(True, "--stream/--no-stream", help="Stream answer tokens."),
+    show_thinking: bool = typer.Option(
+        False,
+        "--show-thinking",
+        help="Show provider-returned thinking/reasoning when the model exposes it.",
+    ),
+) -> None:
     try:
-        console.print(engine().ask(question, limit=limit))
+        current = engine()
+        if stream:
+            for chunk in current.ask_stream(
+                question,
+                limit=limit,
+                show_thinking=show_thinking,
+            ):
+                console.print(chunk, end="", markup=False, highlight=False, soft_wrap=True)
+            console.print()
+        else:
+            console.print(current.ask(question, limit=limit, show_thinking=show_thinking))
     except LMStudioError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
@@ -403,6 +455,75 @@ def _index_job_table(job: IndexJob) -> Table:
     if job.error:
         table.add_row("Error", job.error)
     return table
+
+
+def _select_log_files(logs_path: Path, log: str) -> list[Path]:
+    if log == "openmind":
+        return [logs_path / "openmind.log"] if (logs_path / "openmind.log").exists() else []
+    if log == "index":
+        return sorted(logs_path.glob("index-*.log"))
+    if log == "all":
+        files = [logs_path / "openmind.log"] if (logs_path / "openmind.log").exists() else []
+        files.extend(sorted(logs_path.glob("index-*.log")))
+        return files
+    raise typer.BadParameter("Log must be one of: openmind, index, all")
+
+
+def _tail_log_files(paths: list[Path], lines: int, follow: bool) -> None:
+    positions: dict[Path, int] = {}
+    for path in paths:
+        if not path.exists():
+            continue
+        recent = path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:]
+        for line in recent:
+            _print_log_line(path, line)
+        positions[path] = path.stat().st_size
+
+    if not follow:
+        return
+
+    console.print("[dim]Watching logs. Press Ctrl-C to stop.[/dim]")
+    try:
+        while True:
+            for path in paths:
+                if not path.exists():
+                    continue
+                position = positions.get(path, 0)
+                with path.open("r", encoding="utf-8", errors="replace") as handle:
+                    handle.seek(position)
+                    for line in handle:
+                        _print_log_line(path, line.rstrip("\n"))
+                    positions[path] = handle.tell()
+            time.sleep(1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopped watching logs.[/yellow]")
+
+
+def _print_log_line(path: Path, line: str) -> None:
+    if not line:
+        return
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        console.print(f"[dim]{path.name}[/dim] {line}")
+        return
+    event = payload.pop("event", "log")
+    timestamp = payload.pop("time", "")
+    message = payload.pop("message", "")
+    details = " ".join(f"{key}={value}" for key, value in payload.items())
+    console.print(f"[dim]{timestamp}[/dim] [bold]{event}[/bold] {message} [dim]{details}[/dim]")
+
+
+def _stream_lmstudio_logs() -> None:
+    if shutil.which("lms") is None:
+        console.print("[red]LM Studio CLI `lms` was not found on PATH.[/red]")
+        console.print("Install or expose the LM Studio CLI, then run: lms log stream")
+        raise typer.Exit(1)
+    console.print("[dim]Running `lms log stream`. Press Ctrl-C to stop.[/dim]")
+    try:
+        subprocess.run(["lms", "log", "stream"], check=False)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopped LM Studio log stream.[/yellow]")
 
 
 if __name__ == "__main__":
