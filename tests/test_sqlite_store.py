@@ -55,3 +55,13 @@ def test_sqlite_store_tracks_index_jobs(tmp_path):
     assert updated.progress_percent == 40.0
     assert store.latest_index_job().id == "job_1"
     assert store.latest_active_index_job().status == "running"
+
+
+def test_index_job_progress_is_capped_at_100_percent(tmp_path):
+    store = SQLiteStore(tmp_path / "openmind.sqlite")
+    store.initialize()
+    store.create_index_job("job_1")
+
+    updated = store.update_index_job("job_1", total_files=10, processed_files=12)
+
+    assert updated.progress_percent == 100.0

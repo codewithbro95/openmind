@@ -106,4 +106,4 @@ class IndexJob(BaseModel):
     def progress_percent(self) -> float:
         if self.total_files <= 0:
             return 0.0
-        return round((self.processed_files / self.total_files) * 100, 1)
+        return round(min((self.processed_files / self.total_files) * 100, 100.0), 1)

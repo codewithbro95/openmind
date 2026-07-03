@@ -189,7 +189,10 @@ def index_pause() -> None:
     if job is None:
         console.print("[yellow]No indexing job has been started.[/yellow]")
         return
-    console.print(f"Indexing status: {job.status}")
+    if job.status == "pause_requested":
+        console.print("Pause requested. Indexing will pause after the current file finishes.")
+    else:
+        console.print(f"Indexing status: {job.status}")
 
 
 @index_app.command("resume")
@@ -198,7 +201,10 @@ def index_resume() -> None:
     if job is None:
         console.print("[yellow]No indexing job has been started.[/yellow]")
         return
-    console.print(f"Indexing status: {job.status}")
+    if job.status == "running":
+        console.print("Indexing resumed.")
+    else:
+        console.print(f"Indexing status: {job.status}")
 
 
 @index_app.command("stop")
@@ -207,7 +213,10 @@ def index_stop() -> None:
     if job is None:
         console.print("[yellow]No indexing job has been started.[/yellow]")
         return
-    console.print(f"Indexing status: {job.status}")
+    if job.status == "stop_requested":
+        console.print("Stop requested. Indexing will stop after the current file finishes.")
+    else:
+        console.print(f"Indexing status: {job.status}")
 
 
 @index_app.command("worker", hidden=True)
