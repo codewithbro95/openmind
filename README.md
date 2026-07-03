@@ -1,4 +1,4 @@
-# OpenMind Core v0.1
+# OpenMind Core v0.2
 
 OpenMind is a local AI memory engine for your computer. It indexes user-approved folders, stores searchable chunks locally, and lets you search or ask questions with sources.
 
@@ -21,14 +21,34 @@ pip install -e ".[dev]"
 
 ## CLI
 
+Normal users should start with setup:
+
+```bash
+openmind setup
+```
+
+Setup initializes local storage, checks LM Studio, lets you choose a chat model and embedding model, asks which folders to index, and starts background indexing.
+
+Lower-level commands remain available:
+
 ```bash
 openmind init
 openmind source add ~/Documents
 openmind source list
 openmind index
+openmind index start
+openmind index status
 openmind search "Portugal visa"
 openmind ask "What documents do I have about moving to Portugal?"
 openmind status
+```
+
+LM Studio commands:
+
+```bash
+openmind provider status
+openmind models list
+openmind models load
 ```
 
 OpenMind stores application data under `~/.openmind` by default:
@@ -43,6 +63,40 @@ OpenMind stores application data under `~/.openmind` by default:
 
 For testing or development, set `OPENMIND_HOME` to another directory.
 
+## LM Studio
+
+OpenMind Core v0.2 uses LM Studio as the only user-facing provider.
+
+Start the LM Studio server from the Developer tab, or run:
+
+```bash
+lms server start
+```
+
+OpenMind uses:
+
+- `GET /api/v1/models` to list local LLM and embedding models.
+- `POST /api/v1/models/load` to load selected models.
+- `POST /v1/chat/completions` to answer questions.
+- `POST /v1/embeddings` to embed chunks and queries.
+
+Saved config:
+
+```toml
+[provider]
+name = "lmstudio"
+base_url = "http://localhost:1234"
+api_token_env = "LM_API_TOKEN"
+
+[models]
+chat_model = "selected-chat-model-key"
+embedding_model = "selected-embedding-model-key"
+
+[indexing]
+auto_start_after_setup = true
+background = true
+```
+
 ## Supported files
 
 `.txt`, `.md`, `.pdf`, `.docx`, `.py`, `.js`, `.ts`, `.json`, `.csv`, and `.html`.
@@ -51,4 +105,21 @@ OpenMind ignores noisy or unsafe folders such as `.git`, `node_modules`, `venv`,
 
 ## Ask mode
 
-`openmind ask` retrieves relevant chunks first. If no answer model is configured, it returns the best retrieved context with sources instead of failing.
+`openmind ask` retrieves relevant chunks first. With LM Studio configured, it uses the selected embedding model for retrieval and selected chat model for the answer. If no chat model is configured, it returns the best retrieved context with sources instead of failing.
+
+## Background Indexing
+
+```bash
+openmind index start
+openmind index status
+openmind index pause
+openmind index resume
+openmind index stop
+```
+
+Indexing has two phases:
+
+1. Discovery: scan enabled sources and count supported files.
+2. Indexing: extract, chunk, embed, and store chunks while updating SQLite progress.
+
+`openmind index status` shows discovered files, processed files, indexed/skipped/failed counts, chunks created, current file, and progress percentage.

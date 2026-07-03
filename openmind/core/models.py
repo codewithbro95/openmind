@@ -76,6 +76,7 @@ class IndexSummary(BaseModel):
     files_indexed: int = 0
     files_skipped: int = 0
     errors: int = 0
+    chunks_created: int = 0
 
 
 class StatusSummary(BaseModel):
@@ -84,3 +85,25 @@ class StatusSummary(BaseModel):
     files: int
     indexed_files: int
     app_home: str
+
+
+class IndexJob(BaseModel):
+    id: str
+    status: str
+    total_files: int = 0
+    processed_files: int = 0
+    indexed_files: int = 0
+    skipped_files: int = 0
+    failed_files: int = 0
+    total_chunks: int = 0
+    current_file: str | None = None
+    error: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    updated_at: str | None = None
+
+    @property
+    def progress_percent(self) -> float:
+        if self.total_files <= 0:
+            return 0.0
+        return round((self.processed_files / self.total_files) * 100, 1)
