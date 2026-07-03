@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 import uuid
+from datetime import UTC, datetime
 
 from openmind.core.config import AppPaths, OpenMindConfig
 from openmind.core.models import Document, IndexJob, IndexSummary, SearchResult, Source, StatusSummary
@@ -101,16 +102,25 @@ class OpenMindEngine:
         self.init()
         active = self.sqlite.latest_active_index_job()
         if active is not None:
-            return active
+            if not self._is_stale_pending_job(active):
+                return active
+            self.sqlite.update_index_job(
+                active.id,
+                status="failed",
+                error="Index worker did not start. Start a new job with: openmind index start",
+                completed_at=utc_now(),
+            )
         job = self.create_index_job()
         env = os.environ.copy()
         env["OPENMIND_HOME"] = str(self.paths.home)
+        log_path = self.paths.logs_path / f"index-{job.id}.log"
+        log_file = log_path.open("a", encoding="utf-8")
         subprocess.Popen(
             [sys.executable, "-m", "openmind.cli.main", "index", "worker", "--job-id", job.id],
             cwd=str(PathLike.cwd()),
             env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=log_file,
             start_new_session=True,
         )
         return job
@@ -195,6 +205,14 @@ class OpenMindEngine:
     def stop_index_job(self) -> IndexJob | None:
         job = self.index_job_status()
         if job and job.status not in {"completed", "failed", "stopped"}:
+            if job.status == "pending":
+                return self.sqlite.update_index_job(
+                    job.id,
+                    status="stopped",
+                    completed_at=utc_now(),
+                    current_file=None,
+                    error="Stopped before worker started.",
+                )
             return self.sqlite.update_index_job(job.id, status="stop_requested")
         return job
 
@@ -299,6 +317,17 @@ class OpenMindEngine:
             self.sqlite.upsert_file(file_record)
             summary.errors += 1
         return summary
+
+    def _is_stale_pending_job(self, job: IndexJob) -> bool:
+        if job.status != "pending" or not job.updated_at:
+            return False
+        try:
+            updated_at = datetime.fromisoformat(job.updated_at)
+        except ValueError:
+            return False
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=UTC)
+        return (datetime.now(UTC) - updated_at).total_seconds() > 30
 
 
 class PathLike:

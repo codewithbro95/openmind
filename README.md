@@ -143,3 +143,24 @@ Indexing has two phases:
 2. Indexing: extract, chunk, embed, and store chunks while updating SQLite progress.
 
 `openmind index status` shows discovered files, processed files, indexed/skipped/failed counts, chunks created, current file, and progress percentage.
+
+If a job stays in `pending` for more than a few seconds, the worker probably failed before it could update SQLite. Worker logs are written under:
+
+```text
+~/.openmind/logs/index-<job-id>.log
+```
+
+In v0.2, indexing requires LM Studio to be running because embeddings are created through the selected LM Studio embedding model.
+
+## Test Data
+
+This repo includes a small `data/` folder with notes, markdown, JSON, CSV, HTML, JavaScript, a sample PDF, and a couple of images.
+
+```bash
+openmind source add ./data
+openmind index start
+openmind index status
+openmind search "Portugal move"
+```
+
+Image files are included for realism, but v0.2 only indexes supported text-like formats and PDFs.
