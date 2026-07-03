@@ -362,6 +362,13 @@ The worker accepts `--job-id` and writes stdout/stderr to:
 
 If a job remains `pending` for more than 30 seconds, a later `openmind index start` marks it failed and creates a new job.
 
+Pause behavior:
+
+- `openmind index pause` sets `pause_requested`.
+- The worker finishes the current file, then changes the state to `paused`.
+- The worker remains paused until `openmind index resume` changes the state back to `running`.
+- `openmind index stop` can stop a paused or running worker.
+
 `openmind index status` reads SQLite and displays a live Rich table until the user exits with `Ctrl-C`.
 
 `openmind index status --once` prints one snapshot and exits.

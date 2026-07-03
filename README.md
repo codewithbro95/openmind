@@ -137,6 +137,8 @@ openmind index resume
 openmind index stop
 ```
 
+`pause` requests a pause and the worker stops before the next file. If a file is already inside a slow extraction or embedding request, the pause takes effect as soon as that current file finishes.
+
 Indexing has two phases:
 
 1. Discovery: scan enabled sources and count supported files.

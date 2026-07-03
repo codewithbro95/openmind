@@ -132,7 +132,19 @@ class OpenMindEngine:
             raise KeyError(f"Unknown index job: {job_id}")
 
         try:
-            self.sqlite.update_index_job(job_id, status="discovering", error=None)
+            self.sqlite.update_index_job(
+                job_id,
+                status="discovering",
+                total_files=0,
+                processed_files=0,
+                indexed_files=0,
+                skipped_files=0,
+                failed_files=0,
+                total_chunks=0,
+                current_file=None,
+                error=None,
+                completed_at=None,
+            )
             records = self.discover_files()
             self.sqlite.update_index_job(job_id, total_files=len(records), status="running")
 
@@ -146,7 +158,7 @@ class OpenMindEngine:
                         current_file=None,
                     )
 
-                while job and job.status == "pause_requested":
+                while job and job.status in {"pause_requested", "paused"}:
                     self.sqlite.update_index_job(job_id, status="paused")
                     time.sleep(1)
                     job = self.sqlite.get_index_job(job_id)
