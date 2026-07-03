@@ -8,15 +8,35 @@ It starts with three jobs:
 2. Search indexed memory.
 3. Ask source-grounded questions.
 
-No UI, cloud sync, browser extension, agent automation, or file-moving behavior is included in v0.1.
+No UI, cloud sync, browser extension, agent automation, or file-moving behavior is included in v0.2.
 
 ## Install for development
 
+OpenMind uses `uv` for dependency management. If you already have a conda environment named `openmind`, use that environment and let `uv` install the Python packages into it:
+
 ```bash
 cd openmind-core
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+conda activate openmind
+uv pip install -e ".[dev]"
+pytest
+```
+
+Why this path: `uv pip install` detects an activated conda environment and installs into it, so you keep your existing env while still getting uv's fast resolver/installer.
+
+If you do not want to use conda, let uv create the project environment:
+
+```bash
+cd openmind-core
+uv sync --all-extras
+uv run pytest
+```
+
+Useful dependency commands:
+
+```bash
+uv lock                # update uv.lock from pyproject.toml
+uv sync --all-extras   # sync a uv-managed .venv
+uv pip install -e ".[dev]"  # install into the active conda/venv environment
 ```
 
 ## CLI

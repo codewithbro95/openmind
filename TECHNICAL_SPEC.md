@@ -84,7 +84,26 @@ Development:
 
 - `pytest`
 
-Later, not v0.1:
+Dependency management:
+
+- `uv`
+- `pyproject.toml`
+- `uv.lock`
+
+OpenMind supports two install paths:
+
+```bash
+conda activate openmind
+uv pip install -e ".[dev]"
+```
+
+or:
+
+```bash
+uv sync --all-extras
+```
+
+Later, not v0.2:
 
 - `fastapi`
 - `uvicorn`
