@@ -6,7 +6,7 @@ import pytest
 
 from openmind.core.models import SearchResult
 from openmind.llm.answer import ContextOnlyAnswerProvider
-from openmind.providers.lmstudio.client import LMStudioClient
+from openmind.providers.lmstudio.client import LMStudioChatResult, LMStudioClient
 from openmind.providers.lmstudio.errors import LMStudioConnectionError
 from openmind.providers.lmstudio.llm import LMStudioLLMProvider
 from openmind.providers.lmstudio.models import split_models
@@ -24,6 +24,13 @@ class FakeResponse:
 
     def read(self):
         return json.dumps(self.payload).encode("utf-8")
+
+    def __iter__(self):
+        if isinstance(self.payload, list):
+            for line in self.payload:
+                yield line.encode("utf-8")
+            return
+        yield json.dumps(self.payload).encode("utf-8")
 
 
 def test_lmstudio_model_listing_and_split(monkeypatch):
@@ -99,6 +106,103 @@ def test_lmstudio_client_reports_timeout(monkeypatch):
     assert "Timed out waiting for LM Studio" in str(exc.value)
 
 
+def test_lmstudio_chat_extracts_think_block(monkeypatch):
+    def fake_urlopen(request, timeout):
+        return FakeResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "<think>checking sources</think>The answer is grounded."
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = LMStudioClient().chat("thinking-model", [{"role": "user", "content": "Hi"}])
+
+    assert result.reasoning == "checking sources"
+    assert result.content == "The answer is grounded."
+
+
+def test_lmstudio_chat_stream_parses_sse_deltas(monkeypatch):
+    def fake_urlopen(request, timeout):
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["stream"] is True
+        return FakeResponse(
+            [
+                'data: {"choices":[{"delta":{"content":"Hello"}}]}\n',
+                "\n",
+                'data: {"choices":[{"delta":{"content":" world"}}]}\n',
+                "\n",
+                "data: [DONE]\n",
+                "\n",
+            ]
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    deltas = list(LMStudioClient().chat_stream("model", [{"role": "user", "content": "Hi"}]))
+
+    assert [delta.content for delta in deltas] == ["Hello", " world"]
+
+
+def test_lmstudio_responses_extracts_reasoning(monkeypatch):
+    def fake_urlopen(request, timeout):
+        assert request.full_url == "http://localhost:1234/v1/responses"
+        return FakeResponse(
+            {
+                "output": [
+                    {"type": "reasoning", "summary": [{"text": "I checked the context."}]},
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "Use the visa notes."}],
+                    },
+                ]
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = LMStudioClient().respond_with_reasoning(
+        "thinking-model",
+        [{"role": "user", "content": "What should I use?"}],
+    )
+
+    assert "checked the context" in result.reasoning
+    assert result.content == "Use the visa notes."
+
+
+def test_lmstudio_response_stream_parses_reasoning_and_text(monkeypatch):
+    def fake_urlopen(request, timeout):
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["stream"] is True
+        return FakeResponse(
+            [
+                'data: {"type":"response.reasoning_text.delta","delta":"checking"}\n',
+                "\n",
+                'data: {"type":"response.output_text.delta","delta":"Use"}\n',
+                "\n",
+                'data: {"type":"response.output_text.delta","delta":" notes"}\n',
+                "\n",
+                "data: [DONE]\n",
+                "\n",
+            ]
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    deltas = list(
+        LMStudioClient().respond_stream("model", [{"role": "user", "content": "Hi"}])
+    )
+
+    assert deltas[0].reasoning == "checking"
+    assert "".join(delta.content for delta in deltas) == "Use notes"
+
+
 def test_lmstudio_answer_returns_unreachable_message():
     class BrokenClient:
         def is_model_loaded(self, model):
@@ -142,6 +246,63 @@ def test_lmstudio_answer_reports_unloaded_chat_model():
     answer = LMStudioLLMProvider(UnloadedClient(), "qwen").answer("What did I write?", [result])
 
     assert "selected chat model is not loaded" in answer
+
+
+def test_lmstudio_answer_can_show_provider_returned_thinking():
+    class ThinkingClient:
+        def is_model_loaded(self, model):
+            return True
+
+        def respond_with_reasoning(self, model, messages):
+            return LMStudioChatResult(content="Use the visa notes.", reasoning="I checked context.")
+
+    result = SearchResult(
+        id="chunk_1",
+        path="/docs/visa.md",
+        file_name="visa.md",
+        title="visa",
+        text="Visa notes",
+        snippet="Visa notes",
+        score=0.9,
+        chunk_index=0,
+    )
+
+    answer = LMStudioLLMProvider(ThinkingClient(), "qwen").answer(
+        "What did I write?",
+        [result],
+        show_thinking=True,
+    )
+
+    assert "Thinking:" in answer
+    assert "I checked context." in answer
+    assert "Use the visa notes." in answer
+
+
+def test_lmstudio_stream_answer_streams_content_then_sources():
+    class StreamingClient:
+        def is_model_loaded(self, model):
+            return True
+
+        def chat_stream(self, model, messages):
+            yield LMStudioChatResult(content="Use")
+            yield LMStudioChatResult(content=" notes")
+
+    result = SearchResult(
+        id="chunk_1",
+        path="/docs/visa.md",
+        file_name="visa.md",
+        title="visa",
+        text="Visa notes",
+        snippet="Visa notes",
+        score=0.9,
+        chunk_index=0,
+    )
+
+    chunks = list(LMStudioLLMProvider(StreamingClient(), "qwen").stream_answer("Q?", [result]))
+
+    assert chunks[0] == "Use"
+    assert chunks[1] == " notes"
+    assert "Sources:" in chunks[-1]
 
 
 def test_context_only_answer_still_available_for_dev_fallback():
