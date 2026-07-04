@@ -305,5 +305,32 @@ def test_lmstudio_stream_answer_streams_content_then_sources():
     assert "Sources:" in chunks[-1]
 
 
+def test_lmstudio_messages_include_session_history():
+    provider = LMStudioLLMProvider(LMStudioClient(), "qwen")
+    result = SearchResult(
+        id="chunk_1",
+        path="/docs/visa.md",
+        file_name="visa.md",
+        title="visa",
+        text="Visa notes",
+        snippet="Visa notes",
+        score=0.9,
+        chunk_index=0,
+    )
+
+    messages = provider._messages(
+        "What about that?",
+        [result],
+        history=[
+            {"role": "user", "content": "Tell me about Portugal."},
+            {"role": "assistant", "content": "You have visa notes."},
+        ],
+    )
+
+    assert messages[1] == {"role": "user", "content": "Tell me about Portugal."}
+    assert messages[2] == {"role": "assistant", "content": "You have visa notes."}
+    assert "What about that?" in messages[-1]["content"]
+
+
 def test_context_only_answer_still_available_for_dev_fallback():
     assert "did not find" in ContextOnlyAnswerProvider().answer("anything?", [])

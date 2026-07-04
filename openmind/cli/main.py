@@ -10,6 +10,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 from rich.live import Live
+from rich.prompt import Prompt
 from rich.table import Table
 
 from openmind.core.config import (
@@ -309,7 +310,7 @@ def search_command(query: str, limit: int = typer.Option(5, min=1, max=50)) -> N
 
 @app.command("ask")
 def ask_command(
-    question: str,
+    question: str | None = typer.Argument(None),
     limit: int = typer.Option(5, min=1, max=20),
     stream: bool = typer.Option(True, "--stream/--no-stream", help="Stream answer tokens."),
     show_thinking: bool = typer.Option(
@@ -318,6 +319,10 @@ def ask_command(
         help="Show provider-returned thinking/reasoning when the model exposes it.",
     ),
 ) -> None:
+    if question is None:
+        _interactive_ask(limit=limit, stream=stream, show_thinking=show_thinking)
+        return
+
     try:
         current = engine()
         if stream:
@@ -347,6 +352,59 @@ def status_command() -> None:
     table.add_row("Files", str(status.files))
     table.add_row("Indexed files", str(status.indexed_files))
     console.print(table)
+
+
+def _interactive_ask(limit: int, stream: bool, show_thinking: bool) -> None:
+    current = engine()
+    history: list[dict[str, str]] = []
+    console.print("[bold]OpenMind chat[/bold]")
+    console.print("Ask questions about your local memory. Type /exit to leave, /clear to reset.")
+    while True:
+        try:
+            question = Prompt.ask("[bold cyan]you[/bold cyan]").strip()
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[yellow]Closed OpenMind chat.[/yellow]")
+            return
+
+        if not question:
+            continue
+        command = question.lower()
+        if command in {"/exit", "/quit", "exit", "quit"}:
+            console.print("[yellow]Closed OpenMind chat.[/yellow]")
+            return
+        if command == "/clear":
+            history.clear()
+            console.print("[green]Session memory cleared.[/green]")
+            continue
+
+        console.print("[bold green]openmind[/bold green] ", end="")
+        try:
+            if stream:
+                chunks: list[str] = []
+                for chunk in current.ask_stream(
+                    question,
+                    limit=limit,
+                    show_thinking=show_thinking,
+                    history=history,
+                ):
+                    chunks.append(chunk)
+                    console.print(chunk, end="", markup=False, highlight=False, soft_wrap=True)
+                console.print()
+                answer = "".join(chunks).strip()
+            else:
+                answer = current.ask(
+                    question,
+                    limit=limit,
+                    show_thinking=show_thinking,
+                    history=history,
+                )
+                console.print(answer)
+        except LMStudioError as exc:
+            console.print(f"[red]{exc}[/red]")
+            continue
+
+        history.append({"role": "user", "content": question})
+        history.append({"role": "assistant", "content": answer})
 
 
 def _choose_model(
