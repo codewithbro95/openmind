@@ -1,18 +1,83 @@
-# OpenMind Core v0.2
+<p align="center">
+  <img src="assets/openmind-banner.png" alt="OpenMind banner" width="100%">
+</p>
 
-OpenMind is a local AI memory engine for your computer. It indexes user-approved folders, stores searchable chunks locally, and lets you search or ask questions with sources.
+# OpenMind Core
 
-It starts with three jobs:
+OpenMind is a local AI memory engine for your computer.
 
-1. Index local files.
-2. Search indexed memory.
-3. Ask source-grounded questions.
+It indexes folders you explicitly approve, stores searchable memory locally, and lets you search or ask questions across your own files with sources attached.
 
-No UI, cloud sync, browser extension, agent automation, or file-moving behavior is included in v0.2.
+OpenMind is not a chatbot, desktop UI, browser extension, cloud sync service, or agent that controls your machine. The first useful version does three things well:
 
-## Install for development
+```text
+Index local files -> Search local memory -> Ask source-grounded questions
+```
 
-OpenMind uses `uv` for dependency management. If you already have a conda environment named `openmind`, use that environment and let `uv` install the Python packages into it:
+## Why OpenMind
+
+Most AI file tools start with "upload your documents." OpenMind starts with a different premise:
+
+Your files should stay where they are.
+
+OpenMind is built around a simple local-first loop:
+
+```text
+Local file
+  -> extract text
+  -> clean text
+  -> split into chunks
+  -> create embeddings
+  -> store in LanceDB
+  -> search relevant chunks
+  -> answer with sources
+```
+
+The goal is to become an open local memory layer for personal AI systems. Not the model. The memory layer.
+
+## Current Status
+
+OpenMind Core is early, but usable as a developer-facing CLI.
+
+What works today:
+
+- Local app storage under `~/.openmind`.
+- User-approved folder sources.
+- File extraction for common text, code, PDF, DOCX, CSV, JSON, and HTML files.
+- LanceDB vector storage.
+- SQLite source, file, and indexing job records.
+- LM Studio as the user-facing local AI provider.
+- Background indexing with live progress.
+- Streaming answers by default.
+- Interactive ask sessions with temporary conversation memory.
+- Source-grounded answers.
+- Developer log inspection.
+
+What is intentionally not here yet:
+
+- No desktop UI.
+- No browser extension.
+- No cloud sync.
+- No file automation.
+- No plugin marketplace.
+- No deleting, moving, or modifying user files.
+
+See [FEATURES.md](FEATURES.md) for the complete shipped feature list and roadmap. See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
+## Requirements
+
+- Python 3.11+
+- `uv`
+- LM Studio for local chat and embedding models
+- macOS, Linux, or another Python-supported environment
+
+OpenMind Core v0.2 uses LM Studio as its only user-facing provider. The older Sentence Transformers provider remains only as a development and test fallback.
+
+## Install
+
+Clone the project, enter the package directory, and install it into your Python environment.
+
+If you already have a conda environment named `openmind`:
 
 ```bash
 cd openmind-core
@@ -21,9 +86,9 @@ uv pip install -e ".[dev]"
 pytest
 ```
 
-Why this path: `uv pip install` detects an activated conda environment and installs into it, so you keep your existing env while still getting uv's fast resolver/installer.
+`uv pip install` detects the activated conda environment and installs the packages into it, while still using uv's fast resolver and installer.
 
-If you do not want to use conda, let uv create the project environment:
+If you want uv to manage the environment itself:
 
 ```bash
 cd openmind-core
@@ -34,73 +99,162 @@ uv run pytest
 Useful dependency commands:
 
 ```bash
-uv lock                # update uv.lock from pyproject.toml
-uv sync --all-extras   # sync a uv-managed .venv
-uv pip install -e ".[dev]"  # install into the active conda/venv environment
+uv lock
+uv sync --all-extras
+uv pip install -e ".[dev]"
 ```
 
-## CLI
+## Quick Start
 
-Normal users should start with setup:
-
-```bash
-openmind setup
-```
-
-Setup initializes local storage, checks LM Studio, lets you choose a chat model and embedding model, asks which folders to index, and starts background indexing.
-
-Lower-level commands remain available:
-
-```bash
-openmind init
-openmind source add ~/Documents
-openmind source list
-openmind index
-openmind index start
-openmind index status
-openmind search "holiday plan"
-openmind ask "What documents do I have about the cabin trip?"
-openmind status
-```
-
-LM Studio commands:
-
-```bash
-openmind provider status
-openmind models list
-openmind models load
-```
-
-OpenMind stores application data under `~/.openmind` by default:
-
-```text
-~/.openmind/
-├── config.toml
-├── openmind.sqlite
-├── lancedb/
-└── logs/
-```
-
-For testing or development, set `OPENMIND_HOME` to another directory.
-
-## LM Studio
-
-OpenMind Core v0.2 uses LM Studio as the only user-facing provider.
-
-Start the LM Studio server from the Developer tab, or run:
+Start the LM Studio local server first. In LM Studio, open the Developer tab and start the server, or run:
 
 ```bash
 lms server start
 ```
 
-OpenMind uses:
+Then run first-time setup:
 
-- `GET /api/v1/models` to list local LLM and embedding models.
-- `POST /api/v1/models/load` to load selected models.
-- `POST /v1/chat/completions` to answer questions.
-- `POST /v1/embeddings` to embed chunks and queries.
+```bash
+openmind setup
+```
 
-Saved config:
+Setup will:
+
+1. Initialize `~/.openmind`.
+2. Check that LM Studio is reachable.
+3. Let you choose LM Studio as the provider.
+4. List available chat and embedding models.
+5. Load the selected models.
+6. Ask which folders to index.
+7. Start background indexing.
+
+Watch indexing progress:
+
+```bash
+openmind index status
+```
+
+Search your local memory:
+
+```bash
+openmind search "holiday plan"
+```
+
+Ask a question with sources:
+
+```bash
+openmind ask "What documents do I have about the cabin trip?"
+```
+
+Start an interactive ask session:
+
+```bash
+openmind ask
+```
+
+## CLI Reference
+
+Normal users should start with:
+
+```bash
+openmind setup
+```
+
+Lower-level initialization:
+
+```bash
+openmind init
+openmind status
+```
+
+Source management:
+
+```bash
+openmind source add ~/Documents
+openmind source list
+openmind source remove <source_id>
+```
+
+Indexing:
+
+```bash
+openmind index
+openmind index start
+openmind index status
+openmind index status --once
+openmind index pause
+openmind index resume
+openmind index stop
+```
+
+Search:
+
+```bash
+openmind search "holiday plan"
+openmind search "OAuth redirect issue" --limit 10
+```
+
+Ask:
+
+```bash
+openmind ask "What do my files say about the cabin trip?"
+openmind ask "What do my files say about the cabin trip?" --no-stream
+openmind ask "What do my files say about the cabin trip?" --show-thinking
+openmind ask "What do my files say about the cabin trip?" --limit 8
+openmind ask
+```
+
+Interactive ask commands:
+
+```text
+/clear  reset the current session memory
+/exit   leave the chat
+/quit   leave the chat
+```
+
+LM Studio provider commands:
+
+```bash
+openmind provider status
+openmind models list
+openmind models load
+openmind models load <model_key>
+```
+
+Developer logs:
+
+```bash
+openmind dev logs
+openmind dev logs --no-follow --lines 40
+openmind dev logs --log all
+openmind dev logs --log index
+openmind dev logs --lm-studio
+```
+
+## LM Studio Integration
+
+OpenMind talks to LM Studio at:
+
+```text
+http://localhost:1234
+```
+
+It uses LM Studio's native REST API for model setup:
+
+```text
+GET  /api/v1/models
+POST /api/v1/models/load
+```
+
+It uses OpenAI-compatible endpoints for inference:
+
+```text
+POST /v1/chat/completions
+POST /v1/responses
+POST /v1/embeddings
+```
+
+OpenMind stores separate model choices because chat and embeddings are different jobs:
 
 ```toml
 [provider]
@@ -117,102 +271,165 @@ auto_start_after_setup = true
 background = true
 ```
 
-## Supported files
+If LM Studio is not running, OpenMind exits with a clear message instead of a Python traceback.
 
-`.txt`, `.md`, `.pdf`, `.docx`, `.py`, `.js`, `.ts`, `.json`, `.csv`, and `.html`.
+## Supported Files
 
-OpenMind ignores noisy or unsafe folders such as `.git`, `node_modules`, `venv`, `.env`, `__pycache__`, `dist`, `build`, `.cache`, and hidden folders.
+OpenMind currently indexes:
 
-## Ask mode
+```text
+.txt
+.md
+.pdf
+.docx
+.py
+.js
+.ts
+.json
+.csv
+.html
+```
 
-`openmind ask` retrieves relevant chunks first. With LM Studio configured, it uses the selected embedding model for retrieval and selected chat model for the answer. If no chat model is configured, it returns the best retrieved context with sources instead of failing.
+It ignores noisy folders such as:
 
-Answers stream by default, so tokens appear as the model generates them:
+```text
+.git
+node_modules
+venv
+.venv
+.env
+__pycache__
+dist
+build
+.cache
+hidden folders
+```
+
+Image files are included in the sample `data/` directory for realism, but v0.2 does not index image content or run OCR.
+
+## Search Mode
+
+Search does not require a chat model. It embeds the query with the selected LM Studio embedding model, searches LanceDB, and returns paths, scores, and snippets.
+
+Example:
+
+```bash
+openmind search "cabin trip checklist"
+```
+
+Output is shaped like:
+
+```text
+1. ~/Documents/checklist/checklist-notes.md
+   Score: 0.91
+   Snippet: The check-in checklist is scheduled...
+```
+
+If search is bad, answers will be bad. OpenMind treats search quality as the foundation.
+
+## Ask Mode
+
+Ask is search plus an answer model:
+
+```text
+question
+  -> retrieve relevant chunks
+  -> build grounded context
+  -> stream answer from LM Studio
+  -> show sources
+```
+
+Answers stream by default:
 
 ```bash
 openmind ask "What do my files say about the cabin trip?"
 ```
 
-Run `openmind ask` without a question to enter an interactive chat session:
-
-```bash
-openmind ask
-```
-
-Inside the session, OpenMind remembers the conversation until you exit, so follow-up questions can refer to earlier turns. Session memory is not saved after the process closes.
-
-Interactive commands:
-
-```text
-/clear  reset the current session memory
-/exit   leave the chat
-/quit   leave the chat
-```
-
-For a non-streaming response:
+Disable streaming when needed:
 
 ```bash
 openmind ask "What do my files say about the cabin trip?" --no-stream
 ```
 
-If the selected LM Studio model exposes thinking or reasoning text, show it with:
+Show provider-returned thinking or reasoning when the selected LM Studio model exposes it:
 
 ```bash
 openmind ask "What do my files say about the cabin trip?" --show-thinking
 ```
 
-If the model does not return explicit thinking/reasoning, OpenMind says that and still returns the answer with sources.
+If the model does not return explicit thinking or reasoning, OpenMind says so and still returns the answer with sources.
+
+Bare `openmind ask` starts a chat-like session:
+
+```bash
+openmind ask
+```
+
+Session history is held in memory while the process is open, so follow-up questions can refer to earlier turns. The session is discarded when you exit.
 
 ## Background Indexing
 
+Start indexing in the background:
+
 ```bash
 openmind index start
+```
+
+Watch a live table:
+
+```bash
 openmind index status
+```
+
+Print status once:
+
+```bash
+openmind index status --once
+```
+
+Pause, resume, or stop:
+
+```bash
 openmind index pause
 openmind index resume
 openmind index stop
 ```
-
-`pause` requests a pause and the worker stops before the next file. If a file is already inside a slow extraction or embedding request, the pause takes effect as soon as that current file finishes.
 
 Indexing has two phases:
 
 1. Discovery: scan enabled sources and count supported files.
 2. Indexing: extract, chunk, embed, and store chunks while updating SQLite progress.
 
-`openmind index status` shows a live table with discovered files, processed files, indexed/skipped/failed counts, chunks created, current file, and progress percentage. It keeps refreshing until you press `Ctrl-C`.
+The live table shows:
 
-For a one-shot status check:
+- Job id
+- State
+- Files discovered
+- Files processed
+- Files indexed
+- Files skipped
+- Files failed
+- Chunks created
+- Progress percentage
+- Current file
 
-```bash
-openmind index status --once
-```
+Pause and stop take effect after the current file finishes. If a file is already inside a slow extraction or embedding request, the worker checks the requested state before moving to the next file.
 
-If a job stays in `pending` for more than a few seconds, the worker probably failed before it could update SQLite. Worker logs are written under:
+## Logs
 
-```text
-~/.openmind/logs/index-<job-id>.log
-```
-
-In v0.2, indexing requires LM Studio to be running because embeddings are created through the selected LM Studio embedding model.
-
-Search and ask also use the selected LM Studio embedding model. If LM Studio times out while generating embeddings, OpenMind exits with a short error message instead of a Python traceback.
-
-## Developer Logs
-
-OpenMind writes structured JSONL logs to:
+OpenMind writes structured logs to:
 
 ```text
 ~/.openmind/logs/openmind.log
 ```
 
-Index worker stdout/stderr logs are written to:
+Index worker logs are written to:
 
 ```text
 ~/.openmind/logs/index-<job-id>.log
 ```
 
-Watch OpenMind logs:
+Watch logs:
 
 ```bash
 openmind dev logs
@@ -230,17 +447,47 @@ Watch all OpenMind logs:
 openmind dev logs --log all
 ```
 
-Watch LM Studio logs directly through its CLI:
+Watch only index worker logs:
+
+```bash
+openmind dev logs --log index
+```
+
+Watch LM Studio logs through its CLI:
 
 ```bash
 openmind dev logs --lm-studio
 ```
 
-That command runs `lms log stream`, which LM Studio recommends for inspecting model input during development.
+That command runs:
+
+```bash
+lms log stream
+```
+
+## Local Storage
+
+OpenMind stores app data under `~/.openmind` by default:
+
+```text
+~/.openmind/
+├── config.toml
+├── openmind.sqlite
+├── lancedb/
+└── logs/
+```
+
+For development and tests, use a separate home:
+
+```bash
+OPENMIND_HOME=/tmp/openmind-dev openmind status
+```
 
 ## Test Data
 
-This repo includes a small `data/` folder with notes, markdown, JSON, CSV, HTML, JavaScript, a sample PDF, and a couple of images.
+This repo includes a small `data/` folder with notes, Markdown, JSON, CSV, HTML, JavaScript, a sample PDF, and images.
+
+Try it:
 
 ```bash
 openmind source add ./data
@@ -249,4 +496,74 @@ openmind index status
 openmind search "holiday plan"
 ```
 
-Image files are included for realism, but v0.2 only indexes supported text-like formats and PDFs.
+## Project Structure
+
+```text
+openmind/
+├── cli/
+├── core/
+├── sources/
+├── extractors/
+├── ingestion/
+├── embeddings/
+├── storage/
+├── retrieval/
+├── llm/
+└── providers/
+```
+
+The design is deliberately boring inside: each stage has a small job, and the provider layer is replaceable without rewriting ingestion, storage, or retrieval.
+
+## Development
+
+Install development dependencies:
+
+```bash
+uv pip install -e ".[dev]"
+```
+
+Run tests:
+
+```bash
+pytest
+```
+
+Or with uv:
+
+```bash
+uv run pytest
+```
+
+Keep docs in sync when behavior changes:
+
+- Update [FEATURES.md](FEATURES.md) when a feature lands.
+- Update [CHANGELOG.md](CHANGELOG.md) for user-facing release notes.
+- Update [TECHNICAL_SPEC.md](TECHNICAL_SPEC.md) when architecture, schema, or interfaces change.
+- Update this README when normal user workflow changes.
+
+## Roadmap
+
+Near-term work:
+
+- Better indexing error inspection.
+- Failed-file retry commands.
+- Rebuild index command.
+- Source enable and disable.
+- Hybrid keyword plus vector search.
+- Better snippets and citations.
+- OCR for screenshots and scanned PDFs.
+- Persistent chat sessions.
+- Local API for future UI clients.
+- Additional providers after LM Studio is solid.
+
+The full roadmap lives in [FEATURES.md](FEATURES.md).
+
+## Contributing
+
+OpenMind is early and intentionally small. Good contributions make the core more trustworthy without adding premature surface area.
+
+Start with [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+Apache-2.0. See the package metadata in [pyproject.toml](pyproject.toml).
