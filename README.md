@@ -219,6 +219,8 @@ openmind provider status
 openmind models list
 openmind models load
 openmind models load <model_key>
+openmind models update
+openmind models update --no-load
 ```
 
 Developer logs:
@@ -270,6 +272,14 @@ embedding_model = "selected-embedding-model-key"
 auto_start_after_setup = true
 background = true
 ```
+
+To change saved models later, run:
+
+```bash
+openmind models update
+```
+
+OpenMind will ask for the provider, fetch the latest LM Studio model list, let you choose a chat model and embedding model, save the new config, and load the selected models by default.
 
 If LM Studio is not running, OpenMind exits with a clear message instead of a Python traceback.
 
@@ -566,4 +576,4 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Apache-2.0. See the package metadata in [pyproject.toml](pyproject.toml).
+MIT. See [LICENSE](LICENSE).
