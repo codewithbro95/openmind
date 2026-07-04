@@ -256,6 +256,91 @@ def models_load(model_key: str | None = typer.Argument(None)) -> None:
         raise typer.Exit(1) from exc
 
 
+@models_app.command("update")
+def models_update(
+    load: bool = typer.Option(
+        True,
+        "--load/--no-load",
+        help="Load the newly selected models after saving them.",
+    ),
+) -> None:
+    current = engine()
+    current.init()
+    config = current.config
+    current_provider_name = config.provider.name
+    current_chat_model = config.models.chat_model if current_provider_name == "lmstudio" else ""
+    current_embedding_model = (
+        config.models.embedding_model if current_provider_name == "lmstudio" else ""
+    )
+
+    console.print("Choose AI provider:")
+    console.print("1. LM Studio")
+    provider_choice = typer.prompt("Selected", default="1")
+    if provider_choice.strip() != "1":
+        raise typer.BadParameter("Only LM Studio is supported in v0.2.")
+
+    default_base_url = (
+        config.provider.base_url
+        if config.provider.name == "lmstudio"
+        else DEFAULT_LMSTUDIO_BASE_URL
+    )
+    base_url = typer.prompt("LM Studio base URL", default=default_base_url)
+    config.provider = ProviderSettings(
+        name="lmstudio",
+        base_url=base_url,
+        api_token_env=config.provider.api_token_env or "LM_API_TOKEN",
+    )
+    current.save_config(config)
+
+    console.print(f"Fetching LM Studio models from {base_url}...")
+    try:
+        models = current.list_lmstudio_models()
+    except LMStudioConnectionError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    chat_models, embedding_models = split_models(models)
+    chat_model_key = _choose_model_key(
+        "Available chat models",
+        chat_models,
+        allow_empty=True,
+        current_key=current_chat_model,
+    )
+    embedding_model_key = _choose_model_key(
+        "Available embedding models",
+        embedding_models,
+        allow_empty=False,
+        current_key=current_embedding_model,
+    )
+
+    config.models.chat_model = chat_model_key
+    config.models.embedding_model = embedding_model_key
+    current.save_config(config)
+    console.print("[green]Saved model configuration.[/green]")
+
+    if not load:
+        console.print("Run `openmind models load` when you are ready to load the selected models.")
+        return
+
+    console.print("Loading selected models...")
+    try:
+        client = current.lmstudio_client()
+        loaded_count = 0
+        if chat_model_key:
+            client.load_model(chat_model_key)
+            loaded_count += 1
+            console.print("[green]✓[/green] Chat model loaded")
+        else:
+            console.print("[yellow]Search-only mode enabled because no chat model was selected.[/yellow]")
+        client.load_model(embedding_model_key)
+        loaded_count += 1
+        console.print("[green]✓[/green] Embedding model loaded")
+        console.print(f"[green]Loaded selected models[/green] ({loaded_count})")
+    except LMStudioError as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        console.print("You can retry loading models with: openmind models load")
+
+
 @provider_app.command("status")
 def provider_status() -> None:
     ok, message = engine().provider_status()
@@ -429,6 +514,43 @@ def _choose_model(
     try:
         selected_index = int(choice) - 1
         return models[selected_index]
+    except (ValueError, IndexError) as exc:
+        raise typer.BadParameter("Invalid model selection.") from exc
+
+
+def _choose_model_key(
+    title: str,
+    models: list[LMStudioModel],
+    allow_empty: bool,
+    current_key: str = "",
+) -> str:
+    if not models:
+        if allow_empty:
+            console.print("[yellow]No chat model found. Search-only mode will be used.[/yellow]")
+            return ""
+        console.print("[red]No embedding model found in LM Studio.[/red]")
+        console.print("OpenMind needs an embedding model to build local memory.")
+        console.print("Download one manually in LM Studio, then run this command again.")
+        raise typer.Exit(1)
+
+    console.print(title + ":")
+    if current_key:
+        console.print(f"Current: {current_key}")
+    if allow_empty:
+        console.print("0. Search-only mode (no chat model)")
+    for index, model in enumerate(models, start=1):
+        loaded = " loaded" if model.is_loaded else ""
+        console.print(f"{index}. {model.display_name} ({model.key}){loaded}")
+
+    default = "keep" if current_key else "1"
+    choice = typer.prompt("Choose model", default=default).strip()
+    if current_key and choice.lower() in {"keep", "k"}:
+        return current_key
+    if allow_empty and choice.lower() in {"0", "none", "skip", "search-only"}:
+        return ""
+    try:
+        selected_index = int(choice) - 1
+        return models[selected_index].key
     except (ValueError, IndexError) as exc:
         raise typer.BadParameter("Invalid model selection.") from exc
 

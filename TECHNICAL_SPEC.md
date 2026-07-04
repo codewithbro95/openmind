@@ -233,6 +233,7 @@ openmind index resume
 openmind index stop
 openmind models list
 openmind models load
+openmind models update
 openmind provider status
 openmind search "<query>" --limit 5
 openmind ask "<question>" --limit 5
@@ -320,6 +321,17 @@ OpenAI-compatible API:
 - `POST /v1/embeddings`
 
 `openmind ask --show-thinking` uses the Responses endpoint with a `reasoning` payload and displays reasoning only when LM Studio returns explicit reasoning/thinking text. OpenMind also handles chat responses that expose fields such as `reasoning_content`, `thinking`, or a visible `<think>...</think>` block.
+
+`openmind models update` re-runs provider and model selection after setup:
+
+1. Initialize OpenMind if needed.
+2. Ask for provider selection. LM Studio is the only v0.2 provider.
+3. Fetch `GET /api/v1/models`.
+4. Split models into chat and embedding lists.
+5. Let the user choose a chat model, or search-only mode.
+6. Require one embedding model.
+7. Save the selected keys to `~/.openmind/config.toml`.
+8. Load the selected models unless `--no-load` is passed.
 
 `openmind ask` streams by default:
 

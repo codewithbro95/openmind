@@ -2,6 +2,11 @@
 
 User-facing changes for each OpenMind Core release.
 
+## Unreleased
+
+- Added `openmind models update` to change saved LM Studio chat and embedding models.
+- Added an option to save model changes without loading them immediately.
+
 ## 0.2.0 - 2026-07-04
 
 - Added first-run setup with `openmind setup`.
