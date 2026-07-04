@@ -328,6 +328,15 @@ OpenAI-compatible API:
 - `--no-stream` uses the previous full-response behavior
 - sources are appended after streaming finishes
 
+Interactive ask:
+
+- `openmind ask` with no question starts an interactive chat session.
+- Session history is held in memory only.
+- Follow-up retrieval uses the current user question plus recent session history.
+- The LLM receives recent user/assistant messages plus fresh local file context for the current turn.
+- `/clear` resets session history.
+- `/exit` and `/quit` close the session.
+
 ## Indexing Flow
 
 1. Load enabled sources from SQLite.

@@ -19,12 +19,13 @@ class LMStudioLLMProvider(AnswerProvider):
         question: str,
         context: list[SearchResult],
         show_thinking: bool = False,
+        history: list[dict[str, str]] | None = None,
     ) -> str:
         if not context:
             return "I did not find any indexed documents that match this question."
 
         sources = format_sources(context)
-        messages = self._messages(question, context)
+        messages = self._messages(question, context, history=history)
         try:
             if not self.client.is_model_loaded(self.model):
                 return (
@@ -61,13 +62,14 @@ class LMStudioLLMProvider(AnswerProvider):
         question: str,
         context: list[SearchResult],
         show_thinking: bool = False,
+        history: list[dict[str, str]] | None = None,
     ) -> Iterator[str]:
         if not context:
             yield "I did not find any indexed documents that match this question."
             return
 
         sources = format_sources(context)
-        messages = self._messages(question, context)
+        messages = self._messages(question, context, history=history)
         try:
             if not self.client.is_model_loaded(self.model):
                 yield "The selected chat model is not loaded.\nRun:\nopenmind models load"
@@ -112,17 +114,27 @@ class LMStudioLLMProvider(AnswerProvider):
         source_lines = "\n".join(f"- {source}" for source in sources)
         yield f"\n\nSources:\n{source_lines}"
 
-    def _messages(self, question: str, context: list[SearchResult]) -> list[dict[str, str]]:
+    def _messages(
+        self,
+        question: str,
+        context: list[SearchResult],
+        history: list[dict[str, str]] | None = None,
+    ) -> list[dict[str, str]]:
         context_text = build_context(context)
-        return [
+        messages = [
             {
                 "role": "system",
                 "content": (
                     "You answer questions using only the provided local file context. "
                     "If the context does not support a claim, say you did not find it. "
-                    "Always keep the answer concise and source-grounded."
+                    "Always keep the answer concise and source-grounded. "
+                    "Use the prior conversation only to understand follow-up questions."
                 ),
             },
+        ]
+        if history:
+            messages.extend(_trim_history(history))
+        messages.append(
             {
                 "role": "user",
                 "content": (
@@ -130,5 +142,17 @@ class LMStudioLLMProvider(AnswerProvider):
                     f"Local file context:\n{context_text}\n\n"
                     "Answer with a short summary and mention the relevant source paths."
                 ),
-            },
-        ]
+            }
+        )
+        return messages
+
+
+def _trim_history(history: list[dict[str, str]], max_messages: int = 10) -> list[dict[str, str]]:
+    allowed_roles = {"user", "assistant"}
+    trimmed = []
+    for item in history[-max_messages:]:
+        role = item.get("role", "")
+        content = item.get("content", "")
+        if role in allowed_roles and content:
+            trimmed.append({"role": role, "content": content[-4000:]})
+    return trimmed

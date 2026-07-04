@@ -133,6 +133,22 @@ Answers stream by default, so tokens appear as the model generates them:
 openmind ask "What do my files say about the cabin trip?"
 ```
 
+Run `openmind ask` without a question to enter an interactive chat session:
+
+```bash
+openmind ask
+```
+
+Inside the session, OpenMind remembers the conversation until you exit, so follow-up questions can refer to earlier turns. Session memory is not saved after the process closes.
+
+Interactive commands:
+
+```text
+/clear  reset the current session memory
+/exit   leave the chat
+/quit   leave the chat
+```
+
 For a non-streaming response:
 
 ```bash

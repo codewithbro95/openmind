@@ -267,10 +267,21 @@ class OpenMindEngine:
         self._log("search.finish", "Search finished", query=query, results=len(results))
         return results
 
-    def ask(self, question: str, limit: int = 5, show_thinking: bool = False) -> str:
+    def ask(
+        self,
+        question: str,
+        limit: int = 5,
+        show_thinking: bool = False,
+        history: list[dict[str, str]] | None = None,
+    ) -> str:
         self._log("ask.start", "Answering question", question=question, limit=limit)
-        results = self.search(question, limit=limit)
-        answer = self.answer_provider.answer(question, results, show_thinking=show_thinking)
+        results = self.search(self._conversation_search_query(question, history), limit=limit)
+        answer = self.answer_provider.answer(
+            question,
+            results,
+            show_thinking=show_thinking,
+            history=history,
+        )
         self._log("ask.finish", "Answer finished", question=question, sources=len(results))
         return answer
 
@@ -279,13 +290,15 @@ class OpenMindEngine:
         question: str,
         limit: int = 5,
         show_thinking: bool = False,
+        history: list[dict[str, str]] | None = None,
     ) -> Iterator[str]:
         self._log("ask.start", "Streaming answer", question=question, limit=limit)
-        results = self.search(question, limit=limit)
+        results = self.search(self._conversation_search_query(question, history), limit=limit)
         for chunk in self.answer_provider.stream_answer(
             question,
             results,
             show_thinking=show_thinking,
+            history=history,
         ):
             yield chunk
         self._log("ask.finish", "Streaming answer finished", question=question, sources=len(results))
@@ -397,6 +410,18 @@ class OpenMindEngine:
 
     def _log(self, event: str, message: str, **fields) -> None:
         append_log(self.paths, event, message, **fields)
+
+    def _conversation_search_query(
+        self,
+        question: str,
+        history: list[dict[str, str]] | None,
+    ) -> str:
+        if not history:
+            return question
+        recent = history[-6:]
+        parts = [f"{item.get('role', 'message')}: {item.get('content', '')}" for item in recent]
+        parts.append(f"user: {question}")
+        return "\n".join(parts)
 
 
 class PathLike:

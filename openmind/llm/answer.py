@@ -14,6 +14,7 @@ class AnswerProvider(ABC):
         question: str,
         context: list[SearchResult],
         show_thinking: bool = False,
+        history: list[dict[str, str]] | None = None,
     ) -> str:
         raise NotImplementedError
 
@@ -22,8 +23,14 @@ class AnswerProvider(ABC):
         question: str,
         context: list[SearchResult],
         show_thinking: bool = False,
+        history: list[dict[str, str]] | None = None,
     ) -> Iterator[str]:
-        yield self.answer(question, context, show_thinking=show_thinking)
+        yield self.answer(
+            question,
+            context,
+            show_thinking=show_thinking,
+            history=history,
+        )
 
 
 class ContextOnlyAnswerProvider(AnswerProvider):
@@ -32,6 +39,7 @@ class ContextOnlyAnswerProvider(AnswerProvider):
         question: str,
         context: list[SearchResult],
         show_thinking: bool = False,
+        history: list[dict[str, str]] | None = None,
     ) -> str:
         if not context:
             return "I did not find any indexed documents that match this question."
