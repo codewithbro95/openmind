@@ -58,6 +58,18 @@ class LMStudioClient:
             payload["context_length"] = context_length
         return self._request("POST", "/api/v1/models/load", payload)
 
+    def load_model_if_needed(
+        self,
+        model_key: str,
+        context_length: int | None = None,
+    ) -> dict[str, Any]:
+        if self.is_model_loaded(model_key):
+            return {"status": "already_loaded", "model": model_key, "skipped": True}
+        response = self.load_model(model_key, context_length=context_length)
+        response.setdefault("model", model_key)
+        response["skipped"] = False
+        return response
+
     def is_model_loaded(self, model_key: str) -> bool:
         for model in self.list_models():
             if model.key == model_key:

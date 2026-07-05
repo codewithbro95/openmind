@@ -17,6 +17,6 @@ class LMStudioEmbeddingProvider(EmbeddingProvider):
         return self._dimension
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        if texts and not self.client.is_model_loaded(self.model):
-            self.client.load_model(self.model)
+        if texts:
+            self.client.load_model_if_needed(self.model)
         return self.client.embed(self.model, texts)
