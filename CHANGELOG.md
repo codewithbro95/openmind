@@ -1,0 +1,39 @@
+# Changelog
+
+User-facing changes for each OpenMind Core release.
+
+## Unreleased
+
+- Added `openmind models update` to change saved LM Studio chat and embedding models.
+- Added an option to save model changes without loading them immediately.
+
+## 0.2.0 - 2026-07-04
+
+- Added first-run setup with `openmind setup`.
+- Added LM Studio as the default local AI provider.
+- Added model commands for listing and loading LM Studio models.
+- Added background indexing with live progress.
+- Added pause, resume, and stop controls for indexing.
+- Added streaming answers by default.
+- Added interactive chat mode with bare `openmind ask`.
+- Added optional thinking/reasoning display with `--show-thinking`.
+- Added developer log viewing with `openmind dev logs`.
+- Added graceful LM Studio error messages instead of Python tracebacks.
+- Added `uv` dependency management.
+- Added sample local test data in `data/`.
+- Fixed editable install issues.
+- Fixed background indexing startup, pause, stop, and progress display issues.
+
+## 0.1.0 - 2026-07-03
+
+- Added the first OpenMind Python package and CLI.
+- Added local app storage under `~/.openmind`.
+- Added source folder management.
+- Added local file scanning for user-approved folders.
+- Added text extraction for common file types.
+- Added text normalization and chunking.
+- Added local vector storage with LanceDB.
+- Added SQLite records for sources, files, and indexing state.
+- Added search over indexed local files.
+- Added basic ask mode with source-grounded context.
+- Added the first README, technical spec, and test suite.

@@ -1,4 +1,5 @@
 from openmind.core.models import SearchResult
+from openmind.core.engine import OpenMindEngine
 from openmind.embeddings.provider import HashEmbeddingProvider
 from openmind.llm.answer import ContextOnlyAnswerProvider
 from openmind.retrieval.search import SearchService
@@ -39,3 +40,19 @@ def test_context_only_answer_returns_sources():
     assert "No LLM provider is configured" in answer
     assert "/docs/checklist.md" in answer
     assert "holiday holiday checklist" in answer
+
+
+def test_conversation_search_query_includes_recent_history():
+    engine = OpenMindEngine(embeddings=HashEmbeddingProvider())
+
+    query = engine._conversation_search_query(
+        "What about the checklist?",
+        [
+            {"role": "user", "content": "Tell me about holiday planning files."},
+            {"role": "assistant", "content": "I found checklist notes."},
+        ],
+    )
+
+    assert "holiday plan files" in query
+    assert "checklist notes" in query
+    assert "What about the checklist?" in query

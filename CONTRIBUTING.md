@@ -1,0 +1,156 @@
+# Contributing to OpenMind
+
+Thanks for helping build OpenMind.
+
+OpenMind is a local-first AI memory engine. The project should stay simple, inspectable, and respectful of user data. Contributions are welcome when they strengthen that direction.
+
+## Project Principles
+
+- Local data stays local.
+- Users explicitly choose which folders are indexed.
+- Answers should show sources.
+- Search quality comes before answer polish.
+- Providers should be replaceable behind small interfaces.
+- No hidden scanning, cloud sync, file automation, or file mutation.
+- Keep the core boring inside so the product can feel useful outside.
+
+## Development Setup
+
+Use Python 3.11+ and `uv`.
+
+With an existing conda environment:
+
+```bash
+conda activate openmind
+uv pip install -e ".[dev]"
+pytest
+```
+
+With a uv-managed environment:
+
+```bash
+uv sync --all-extras
+uv run pytest
+```
+
+Useful commands:
+
+```bash
+uv lock
+uv sync --all-extras
+uv pip install -e ".[dev]"
+```
+
+## Running OpenMind Locally
+
+Start LM Studio first:
+
+```bash
+lms server start
+```
+
+Then run:
+
+```bash
+openmind setup
+openmind index status
+openmind search "holiday plan"
+openmind ask "What do my files say about the cabin trip?"
+```
+
+For isolated testing, set `OPENMIND_HOME`:
+
+```bash
+OPENMIND_HOME=/tmp/openmind-dev openmind setup
+```
+
+## Before Opening a Change
+
+Run the test suite:
+
+```bash
+pytest
+```
+
+Check the user-facing CLI still works for the affected area.
+
+For indexing changes, test at least:
+
+```bash
+openmind source add ./data
+openmind index start
+openmind index status --once
+openmind search "holiday plan"
+```
+
+For ask changes, test streaming and non-streaming behavior:
+
+```bash
+openmind ask "What do my files say about the cabin trip?"
+openmind ask "What do my files say about the cabin trip?" --no-stream
+```
+
+## Documentation Rules
+
+When a feature lands:
+
+- Add it to [FEATURES.md](FEATURES.md).
+- Add a short user-facing note to [CHANGELOG.md](CHANGELOG.md) when it belongs in a release.
+- Update [README.md](README.md) if the normal workflow or CLI changes.
+- Update [TECHNICAL_SPEC.md](TECHNICAL_SPEC.md) if architecture, schema, provider behavior, or interfaces change.
+
+The changelog should stay brief and readable for users. Put deeper implementation details in the technical spec or pull request discussion.
+
+## Code Style
+
+- Prefer small modules with clear responsibilities.
+- Follow the existing Typer and Rich CLI style.
+- Use Pydantic models for structured objects when they cross module boundaries.
+- Keep provider-specific code inside `openmind/providers/`.
+- Keep ingestion, retrieval, and storage provider-agnostic where practical.
+- Avoid broad refactors inside feature changes.
+- Add comments only when they clarify non-obvious behavior.
+
+## Tests
+
+Tests should be focused and practical.
+
+Add tests when you change:
+
+- CLI behavior.
+- SQLite schema or persistence.
+- Source scanning.
+- Extraction or chunking.
+- Embedding or provider behavior.
+- Search or ask flows.
+- Background indexing job state.
+
+Mock LM Studio for provider tests. Do not require contributors to run a local model just to pass the default test suite.
+
+## Privacy and Safety
+
+OpenMind must not scan the whole computer by default.
+
+Do not add behavior that:
+
+- Indexes folders the user did not approve.
+- Uploads file contents to a remote service by default.
+- Deletes, moves, renames, or modifies user files.
+- Hides sources from answers.
+- Silently downloads large models.
+
+If a future feature needs one of those powers, it should be explicit, opt-in, and documented before it ships.
+
+## Good First Contributions
+
+- Improve error messages.
+- Add tests around existing behavior.
+- Improve snippets and source formatting.
+- Add small extractor fixes.
+- Improve README examples.
+- Add failed-file inspection commands.
+- Improve index status and logging output.
+
+## Release Notes
+
+OpenMind uses concise, user-facing changelog entries. Write release notes as short bullets about what changed for users, not as implementation summaries.
