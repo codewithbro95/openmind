@@ -289,6 +289,52 @@ If LM Studio is not running, OpenMind exits with a clear message instead of a Py
 
 OpenMind keeps the architecture intentionally simple. Each technology has one simple job.
 
+### High-Level Overview
+
+OpenMind is the memory engine and CLI. It does not use LM Studio's chat interface, or any other provider's chat UI. It calls a local model server endpoint to reach downloaded models.
+
+Today that local model server is LM Studio. Later, the same provider layer can support other local or OpenAI-compatible servers.
+
+```mermaid
+flowchart TD
+    User["User"] --> CLI["OpenMind CLI"]
+
+    CLI --> Setup["Setup / Config"]
+    CLI --> Sources["Source Manager"]
+    CLI --> Indexing["Indexing Engine"]
+    CLI --> Search["Search"]
+    CLI --> Ask["Ask"]
+
+    Setup --> Config["~/.openmind/config.toml"]
+    Setup --> ModelServer["Local Model Server<br/>(LM Studio today, others later)"]
+
+    Sources --> SQLite["SQLite<br/>sources, files, jobs, status"]
+
+    Indexing --> Scanner["File Scanner<br/>user-approved folders only"]
+    Scanner --> Extractors["Extractors<br/>txt, md, pdf, docx, code, json, csv, html"]
+    Extractors --> Normalizer["Normalize Text"]
+    Normalizer --> Chunker["Chunk Text"]
+    Chunker --> Embeddings["Embedding Provider<br/>calls local embedding endpoint"]
+    Embeddings --> ModelServer
+    Embeddings --> LanceDB["LanceDB<br/>vectors + chunks"]
+
+    Search --> QueryEmbed["Embed Query"]
+    QueryEmbed --> ModelServer
+    QueryEmbed --> LanceDB
+    LanceDB --> Results["Relevant Chunks<br/>path, score, snippet"]
+
+    Ask --> Search
+    Results --> Context["Build Context<br/>with sources"]
+    Context --> AnswerModel["Answer Provider<br/>calls local chat/completion endpoint"]
+    AnswerModel --> ModelServer
+    AnswerModel --> Answer["Answer with Sources"]
+
+    Indexing --> Jobs["Background Index Job"]
+    Jobs --> SQLite
+    CLI --> Logs["Dev Logs"]
+    Logs --> LogFiles["~/.openmind/logs"]
+```
+
 ### SQLite
 
 SQLite is used for **project state and metadata**, not the AI memory itself.
@@ -332,23 +378,27 @@ Simple way to think about it:
 
 > **SQLite keeps track of what OpenMind is doing. LanceDB stores what OpenMind knows.**
 
-### LM Studio
+### Model Provider
 
-LM Studio is the first user-facing AI provider.
+OpenMind uses a model provider abstraction for embeddings and answers.
 
-OpenMind uses LM Studio for:
+In v0.2, the only implemented provider is LM Studio. OpenMind talks to LM Studio's local server endpoint; it does not use the LM Studio chat interface.
+
+OpenMind uses the provider endpoint for:
 
 - embedding local file chunks
 - embedding search queries
 - generating source-grounded answers
 - streaming answer tokens in ask mode
 
-Why LM Studio:
+Why LM Studio first:
 
 - it runs local models on the user's machine
 - it exposes a local API server
 - it supports OpenAI-compatible chat and embedding endpoints
 - it lets OpenMind stay local-first without owning model runtime complexity
+
+Future providers can fit behind the same layer, such as Ollama, llama.cpp, or another OpenAI-compatible local endpoint.
 
 ### Typer and Rich
 
