@@ -281,7 +281,95 @@ openmind models update
 
 OpenMind will ask for the provider, fetch the latest LM Studio model list, let you choose a chat model and embedding model, save the new config, and load the selected models by default.
 
+When loading or updating models, OpenMind checks LM Studio first and skips models that are already loaded.
+
 If LM Studio is not running, OpenMind exits with a clear message instead of a Python traceback.
+
+## Architecture Choices
+
+OpenMind keeps the architecture intentionally simple. Each technology has one simple job.
+
+### SQLite
+
+SQLite is used for **project state and metadata**, not the AI memory itself.
+
+SQLite stores:
+
+- sources and folders the user added
+- file paths and file hashes
+- indexing status
+- indexing progress
+- config and local state
+- failed files or skipped files
+- background job info
+
+Why SQLite:
+
+- it is local and embedded
+- it needs no separate server
+- it is reliable for small structured records
+- it makes indexing progress easy to inspect and resume
+
+### LanceDB
+
+LanceDB is used for **searchable AI memory**.
+
+LanceDB stores:
+
+- extracted text chunks
+- embeddings and vectors
+- chunk metadata
+- source paths for search results and answers
+
+Why LanceDB:
+
+- it runs locally from a directory path
+- it avoids a separate vector database server
+- it is designed for vector search
+- it keeps OpenMind's memory layer portable
+
+Simple way to think about it:
+
+> **SQLite keeps track of what OpenMind is doing. LanceDB stores what OpenMind knows.**
+
+### LM Studio
+
+LM Studio is the first user-facing AI provider.
+
+OpenMind uses LM Studio for:
+
+- embedding local file chunks
+- embedding search queries
+- generating source-grounded answers
+- streaming answer tokens in ask mode
+
+Why LM Studio:
+
+- it runs local models on the user's machine
+- it exposes a local API server
+- it supports OpenAI-compatible chat and embedding endpoints
+- it lets OpenMind stay local-first without owning model runtime complexity
+
+### Typer and Rich
+
+Typer powers the CLI. Rich powers readable terminal output.
+
+Why they are used:
+
+- Typer keeps commands small and type-friendly
+- Rich makes tables, progress views, and errors easier to read
+- the CLI stays usable before any desktop or web UI exists
+
+### uv
+
+uv is used for dependency management and development setup.
+
+Why uv:
+
+- fast installs and dependency resolution
+- works with an existing conda environment
+- supports reproducible lockfiles
+- keeps contributor setup simple
 
 ## Supported Files
 

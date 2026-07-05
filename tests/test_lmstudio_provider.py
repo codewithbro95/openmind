@@ -82,6 +82,34 @@ def test_lmstudio_load_model_posts_model_key(monkeypatch):
     assert response["status"] == "loaded"
 
 
+def test_lmstudio_load_model_if_needed_skips_loaded_model(monkeypatch):
+    requested_urls = []
+
+    def fake_urlopen(request, timeout):
+        requested_urls.append(request.full_url)
+        assert request.full_url == "http://localhost:1234/api/v1/models"
+        return FakeResponse(
+            {
+                "models": [
+                    {
+                        "type": "embedding",
+                        "key": "nomic",
+                        "display_name": "Nomic Embed",
+                        "loaded_instances": [{"id": "nomic", "config": {}}],
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    response = LMStudioClient().load_model_if_needed("nomic")
+
+    assert response["status"] == "already_loaded"
+    assert response["skipped"] is True
+    assert requested_urls == ["http://localhost:1234/api/v1/models"]
+
+
 def test_lmstudio_client_reports_unreachable(monkeypatch):
     def fake_urlopen(request, timeout):
         raise urllib.error.URLError("connection refused")
