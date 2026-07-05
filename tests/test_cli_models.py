@@ -109,3 +109,38 @@ def test_models_update_can_keep_existing_models_without_loading(monkeypatch, tmp
     config = OpenMindConfig.load(tmp_path / "config.toml")
     assert config.models.chat_model == "qwen"
     assert config.models.embedding_model == "nomic"
+
+
+def test_models_update_skips_models_that_are_already_loaded(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENMIND_HOME", str(tmp_path))
+
+    def fake_urlopen(request, timeout):
+        if request.full_url.endswith("/api/v1/models"):
+            return FakeResponse(
+                {
+                    "models": [
+                        {
+                            "type": "llm",
+                            "key": "qwen",
+                            "display_name": "Qwen",
+                            "loaded_instances": [{"id": "qwen", "config": {}}],
+                        },
+                        {
+                            "type": "embedding",
+                            "key": "nomic",
+                            "display_name": "Nomic Embed",
+                            "loaded_instances": [{"id": "nomic", "config": {}}],
+                        },
+                    ]
+                }
+            )
+        if request.full_url.endswith("/api/v1/models/load"):
+            raise AssertionError("Already loaded models should not be loaded again")
+        raise AssertionError(f"Unexpected URL: {request.full_url}")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = CliRunner().invoke(app, ["models", "update"], input="1\n\n1\n1\n")
+
+    assert result.exit_code == 0
+    assert "already loaded" in result.output

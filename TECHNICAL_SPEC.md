@@ -299,6 +299,11 @@ class LMStudioClient:
     def health_check(self) -> bool: ...
     def list_models(self) -> list[LMStudioModel]: ...
     def load_model(self, model_key: str, context_length: int | None = None) -> dict: ...
+    def load_model_if_needed(
+        self,
+        model_key: str,
+        context_length: int | None = None,
+    ) -> dict: ...
     def chat(self, model: str, messages: list[dict]) -> LMStudioChatResult: ...
     def respond_with_reasoning(
         self,
@@ -313,6 +318,8 @@ Native REST API:
 
 - `GET /api/v1/models`
 - `POST /api/v1/models/load`
+
+User-facing model loading must call `GET /api/v1/models` first and skip `POST /api/v1/models/load` when the selected model already has loaded instances.
 
 OpenAI-compatible API:
 

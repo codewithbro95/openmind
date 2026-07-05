@@ -116,6 +116,7 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 - Interactive model re-selection from the latest LM Studio model list.
 - Saves separate chat and embedding model choices to `~/.openmind/config.toml`.
 - Can load newly selected models immediately or save only with `--no-load`.
+- Skips model loading when LM Studio reports the model is already loaded.
 
 ### Search
 

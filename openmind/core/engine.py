@@ -332,9 +332,9 @@ class OpenMindEngine:
         loaded = []
         client = self.lmstudio_client()
         if self.config.models.chat_model:
-            loaded.append(client.load_model(self.config.models.chat_model))
+            loaded.append(client.load_model_if_needed(self.config.models.chat_model))
         if self.config.models.embedding_model:
-            loaded.append(client.load_model(self.config.models.embedding_model))
+            loaded.append(client.load_model_if_needed(self.config.models.embedding_model))
         return loaded
 
     def _build_embedding_provider(self) -> EmbeddingProvider:

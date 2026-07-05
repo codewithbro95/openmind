@@ -98,12 +98,10 @@ def setup_command() -> None:
     try:
         client = current.lmstudio_client()
         if chat_model:
-            client.load_model(chat_model.key)
-            console.print("[green]✓[/green] Chat model loaded")
+            _load_lmstudio_model(client, chat_model.key, "Chat model")
         else:
             console.print("[yellow]Search-only mode enabled because no chat model was selected.[/yellow]")
-        client.load_model(embedding_model.key)
-        console.print("[green]✓[/green] Embedding model loaded")
+        _load_lmstudio_model(client, embedding_model.key, "Embedding model")
     except LMStudioError as exc:
         console.print(f"[yellow]{exc}[/yellow]")
         console.print("You can retry loading models with: openmind models load")
@@ -246,11 +244,10 @@ def models_load(model_key: str | None = typer.Argument(None)) -> None:
     current = engine()
     try:
         if model_key:
-            current.lmstudio_client().load_model(model_key)
-            console.print(f"[green]Loaded model[/green] {model_key}")
+            _load_lmstudio_model(current.lmstudio_client(), model_key, "Model")
         else:
-            loaded = current.load_configured_models()
-            console.print(f"[green]Loaded configured models[/green] ({len(loaded)})")
+            results = current.load_configured_models()
+            _print_model_load_summary(results)
     except LMStudioError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
@@ -325,17 +322,13 @@ def models_update(
     console.print("Loading selected models...")
     try:
         client = current.lmstudio_client()
-        loaded_count = 0
+        results = []
         if chat_model_key:
-            client.load_model(chat_model_key)
-            loaded_count += 1
-            console.print("[green]✓[/green] Chat model loaded")
+            results.append(_load_lmstudio_model(client, chat_model_key, "Chat model"))
         else:
             console.print("[yellow]Search-only mode enabled because no chat model was selected.[/yellow]")
-        client.load_model(embedding_model_key)
-        loaded_count += 1
-        console.print("[green]✓[/green] Embedding model loaded")
-        console.print(f"[green]Loaded selected models[/green] ({loaded_count})")
+        results.append(_load_lmstudio_model(client, embedding_model_key, "Embedding model"))
+        _print_model_load_summary(results)
     except LMStudioError as exc:
         console.print(f"[yellow]{exc}[/yellow]")
         console.print("You can retry loading models with: openmind models load")
@@ -553,6 +546,24 @@ def _choose_model_key(
         return models[selected_index].key
     except (ValueError, IndexError) as exc:
         raise typer.BadParameter("Invalid model selection.") from exc
+
+
+def _load_lmstudio_model(client, model_key: str, label: str) -> dict:
+    result = client.load_model_if_needed(model_key)
+    if result.get("skipped"):
+        console.print(f"[green]✓[/green] {label} already loaded: {model_key}")
+    else:
+        console.print(f"[green]✓[/green] {label} loaded: {model_key}")
+    return result
+
+
+def _print_model_load_summary(results: list[dict]) -> None:
+    loaded_count = sum(1 for result in results if not result.get("skipped"))
+    skipped_count = sum(1 for result in results if result.get("skipped"))
+    console.print(
+        f"[green]Configured models ready[/green] "
+        f"({loaded_count} loaded, {skipped_count} already loaded)"
+    )
 
 
 def _choose_sources(current: OpenMindEngine) -> None:
