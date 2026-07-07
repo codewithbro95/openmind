@@ -10,9 +10,9 @@ class FakeVectorStore:
         return [
             SearchResult(
                 id="chunk_1",
-                path="/docs/checklist.md",
-                file_name="checklist.md",
-                title="checklist",
+                path="/docs/holiday.md",
+                file_name="holiday.md",
+                title="holiday",
                 text="Cabin holiday plan includes trail maps and meal prep.",
                 snippet="Cabin holiday plan includes trail maps and meal prep.",
                 score=0.91,
@@ -28,18 +28,18 @@ def test_search_service_returns_ranked_results():
     results = service.search("holiday plan", limit=1)
 
     assert len(results) == 1
-    assert results[0].path == "/docs/checklist.md"
+    assert results[0].path == "/docs/holiday.md"
     assert results[0].score == 0.91
 
 
 def test_context_only_answer_returns_sources():
     result = FakeVectorStore().search([], limit=1)[0]
 
-    answer = ContextOnlyAnswerProvider().answer("What do I know about the cabin trip?", [result])
+    answer = ContextOnlyAnswerProvider().answer("What do I know about the holiday plan?", [result])
 
     assert "No LLM provider is configured" in answer
-    assert "/docs/checklist.md" in answer
-    assert "holiday holiday checklist" in answer
+    assert "/docs/holiday.md" in answer
+    assert "Cabin holiday plan" in answer
 
 
 def test_conversation_search_query_includes_recent_history():
@@ -53,6 +53,6 @@ def test_conversation_search_query_includes_recent_history():
         ],
     )
 
-    assert "holiday plan files" in query
+    assert "holiday planning files" in query
     assert "checklist notes" in query
     assert "What about the checklist?" in query

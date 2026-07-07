@@ -28,6 +28,9 @@ Current boundaries:
 - `openmind init`
 - `openmind setup`
 - `openmind status`
+- `openmind flush`
+- `openmind uninstall`
+- `openmind uninstall --yes --package`
 - `openmind source add <path>`
 - `openmind source list`
 - `openmind source remove <id>`
@@ -39,10 +42,15 @@ Current boundaries:
 - Uses SQLite for sources, files, and indexing jobs.
 - Uses LanceDB for vector storage.
 - Uses `uv` for dependency management with `uv.lock`.
+- Can remove OpenMind-owned local data with `openmind uninstall`.
+- Can also remove the installed package from the current environment with `--package`.
+- Can reset indexed memory and indexing state with `openmind flush`.
+- Flush preserves config and sources by default, with `--include-sources` for a fuller reset.
 
 ### Source Management
 
 - User-approved folders only.
+- Re-adding an existing source reports that it is already registered.
 - Recursive folder scanning.
 - Ignores noisy folders:
   - `.git`
@@ -64,12 +72,10 @@ Supported indexed formats:
 - `.md`
 - `.pdf`
 - `.docx`
-- `.py`
-- `.js`
-- `.ts`
-- `.json`
 - `.csv`
 - `.html`
+
+OpenMind is document-first by default. Source code, JSON config, package metadata, app asset catalogs, and other low-level project internals are not indexed unless a future opt-in mode is added.
 
 Current image files are not indexed. Sample images exist in `data/` only for fixture realism.
 
@@ -79,8 +85,6 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 - Markdown extraction.
 - PDF extraction with `pypdf`.
 - DOCX extraction with `python-docx`.
-- Code extraction for Python, JavaScript, and TypeScript.
-- JSON extraction.
 - CSV extraction with `pandas`.
 - HTML extraction with BeautifulSoup.
 
@@ -91,6 +95,9 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 - Overlapping chunks.
 - Source path and metadata retained per chunk.
 - Incremental skip for unchanged files that already indexed successfully.
+- Metadata-first discovery to avoid hashing every file before indexing starts.
+- Content hashing only when a file may have changed.
+- Explicit already-indexed reporting for unchanged files that remain accessible.
 
 ### LM Studio Provider
 
@@ -175,6 +182,7 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
   - Discovery.
   - Indexing.
 - Live status table.
+- Live `Already indexed` count for unchanged indexed files.
 - SQLite-backed indexing job state.
 - Worker logs under `~/.openmind/logs/index-<job-id>.log`.
 - Pause/stop take effect after the current file finishes.
@@ -198,7 +206,7 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 
 - `data/` folder with local indexing fixtures.
 - Includes text, Markdown, JSON, CSV, HTML, JavaScript, PDF, PNG, and JPEG samples.
-- Only supported text-like formats and PDFs are indexed in v0.2.
+- Only supported document-first formats and PDFs are indexed in v0.2.
 
 ## Known Limits
 

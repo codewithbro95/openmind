@@ -10,10 +10,6 @@ SUPPORTED_EXTENSIONS = {
     ".md",
     ".pdf",
     ".docx",
-    ".py",
-    ".js",
-    ".ts",
-    ".json",
     ".csv",
     ".html",
 }
@@ -28,11 +24,23 @@ IGNORED_DIRS = {
     "dist",
     "build",
     ".cache",
+    ".build",
+    "target",
+    "coverage",
+    ".next",
+    ".nuxt",
+    ".turbo",
+    ".svelte-kit",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "DerivedData",
+    "Assets.xcassets",
 }
 
 
 class FileScanner:
-    def scan(self, source: Source) -> list[FileRecord]:
+    def scan(self, source: Source, include_content_hash: bool = True) -> list[FileRecord]:
         root = Path(source.path)
         if not root.exists():
             return []
@@ -54,7 +62,7 @@ class FileScanner:
                     extension=extension,
                     size=stat.st_size,
                     modified_at=stat.st_mtime,
-                    content_hash=self.content_hash(path),
+                    content_hash=self.content_hash(path) if include_content_hash else "",
                     status="pending",
                 )
             )

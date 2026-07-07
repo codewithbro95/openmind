@@ -286,11 +286,11 @@ def test_lmstudio_answer_can_show_provider_returned_thinking():
 
     result = SearchResult(
         id="chunk_1",
-        path="/docs/checklist.md",
-        file_name="checklist.md",
-        title="checklist",
-        text="planning notes",
-        snippet="planning notes",
+        path="/docs/holiday.md",
+        file_name="holiday.md",
+        title="holiday",
+        text="Holiday planning notes",
+        snippet="Holiday planning notes",
         score=0.9,
         chunk_index=0,
     )
@@ -317,11 +317,11 @@ def test_lmstudio_stream_answer_streams_content_then_sources():
 
     result = SearchResult(
         id="chunk_1",
-        path="/docs/checklist.md",
-        file_name="checklist.md",
-        title="checklist",
-        text="planning notes",
-        snippet="planning notes",
+        path="/docs/holiday.md",
+        file_name="holiday.md",
+        title="holiday",
+        text="Holiday planning notes",
+        snippet="Holiday planning notes",
         score=0.9,
         chunk_index=0,
     )
@@ -337,11 +337,11 @@ def test_lmstudio_messages_include_session_history():
     provider = LMStudioLLMProvider(LMStudioClient(), "qwen")
     result = SearchResult(
         id="chunk_1",
-        path="/docs/checklist.md",
-        file_name="checklist.md",
-        title="checklist",
-        text="planning notes",
-        snippet="planning notes",
+        path="/docs/holiday.md",
+        file_name="holiday.md",
+        title="holiday",
+        text="Holiday planning notes",
+        snippet="Holiday planning notes",
         score=0.9,
         chunk_index=0,
     )
