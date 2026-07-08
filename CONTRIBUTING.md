@@ -167,7 +167,7 @@ Before a release:
 - Keep test fixtures, internal refactors, and implementation details out of the changelog unless they affect users directly.
 - Merge the release commit from `develop` into `main`.
 
-After the release commit is on `main`, run the `Release` workflow from the GitHub Actions tab.
+After the release commit is on `main`, the `Release` workflow runs automatically when `pyproject.toml` changes.
 
 The workflow:
 
@@ -178,7 +178,7 @@ The workflow:
 - Creates a `vX.Y.Z` git tag.
 - Publishes the GitHub Release using the matching changelog notes.
 
-For normal releases, leave the workflow inputs empty. For backfilling an older release, pass:
+The workflow can also be run manually from the GitHub Actions tab. For the current version, leave the inputs empty. For backfilling an older release, pass:
 
 - `version`: the older version, such as `0.0.1`.
 - `target_ref`: the commit that should be tagged for that release.
