@@ -129,13 +129,19 @@ jobs:
 
           version = os.environ["VERSION"]
           changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
-          pattern = rf"^## {re.escape(version)}(?:\s+-\s+.*)?\n(?P<body>.*?)(?=^## |\Z)"
-          match = re.search(pattern, changelog, flags=re.MULTILINE | re.DOTALL)
+          heading = re.compile(
+              rf"^##\s+\[?{re.escape(version)}\]?(?:\s+-\s+[^\n]*)?\s*$",
+              flags=re.MULTILINE,
+          )
+          match = heading.search(changelog)
 
           if not match:
               raise SystemExit(f"CHANGELOG.md does not contain a section for {version}.")
 
-          body = match.group("body").strip()
+          body_start = match.end()
+          next_heading = re.search(r"^##\s+", changelog[body_start:], flags=re.MULTILINE)
+          body_end = body_start + next_heading.start() if next_heading else len(changelog)
+          body = changelog[body_start:body_end].strip()
           if not body or body == "- No unreleased changes.":
               raise SystemExit(f"CHANGELOG.md section for {version} has no release notes.")
 
