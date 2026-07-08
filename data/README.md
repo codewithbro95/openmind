@@ -12,4 +12,4 @@ openmind search "holiday plan"
 openmind ask "What does my test data say about FleetPulse?"
 ```
 
-Images in `assets/` are intentionally included even though v0.2 does not index image pixels yet.
+Images in `assets/` are intentionally included even though `0.0.3` does not index standalone image pixels yet.

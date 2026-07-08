@@ -54,7 +54,8 @@ class LMStudioLLMProvider(AnswerProvider):
                     "",
                 ]
             )
-        sections.extend([result.content.strip(), "", "Sources:", source_lines])
+        content = result.content.strip() or _empty_answer_fallback(context)
+        sections.extend([content, "", "Sources:", source_lines])
         return "\n".join(sections).strip()
 
     def stream_answer(
@@ -84,6 +85,7 @@ class LMStudioLLMProvider(AnswerProvider):
             answer_started = False
             thinking_seen = False
             hidden_thinking_indicator_seen = False
+            content_seen = False
 
             for delta in stream:
                 if show_thinking and delta.reasoning:
@@ -107,12 +109,17 @@ class LMStudioLLMProvider(AnswerProvider):
                             yield "Answer:\n"
                     else:
                         answer_started = True
+                    content_seen = True
                     yield delta.content
 
             if show_thinking and not thinking_seen:
                 if answer_started:
                     yield "\n\n"
                 yield "Thinking:\nThe selected model did not return explicit thinking/reasoning text."
+            if not content_seen:
+                if hidden_thinking_indicator_seen and not show_thinking:
+                    yield "\n"
+                yield _empty_answer_fallback(context)
         except LMStudioConnectionError as exc:
             yield str(exc)
             return
@@ -176,3 +183,14 @@ def _trim_history(history: list[dict[str, str]], max_messages: int = 10) -> list
         if role in allowed_roles and content:
             trimmed.append({"role": role, "content": content[-4000:]})
     return trimmed
+
+
+def _empty_answer_fallback(context: list[SearchResult]) -> str:
+    lines = [
+        "The model did not return visible answer text, but OpenMind found relevant local context.",
+        "Top retrieved evidence:",
+    ]
+    for index, result in enumerate(context[:3], start=1):
+        lines.append(f"{index}. {result.path}")
+        lines.append(f"   Snippet: {result.snippet}")
+    return "\n".join(lines)

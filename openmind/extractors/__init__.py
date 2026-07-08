@@ -1,3 +1,4 @@
+from openmind.core.config import OCRSettings
 from openmind.extractors.base import Extractor, ExtractorRegistry
 from openmind.extractors.code import CodeExtractor
 from openmind.extractors.docx import DocxExtractor
@@ -7,12 +8,12 @@ from openmind.extractors.tabular import CsvExtractor, JsonExtractor
 from openmind.extractors.text import MarkdownExtractor, TextExtractor
 
 
-def default_registry() -> ExtractorRegistry:
+def default_registry(ocr_settings: OCRSettings | None = None) -> ExtractorRegistry:
     return ExtractorRegistry(
         [
             TextExtractor(),
             MarkdownExtractor(),
-            PDFExtractor(),
+            PDFExtractor(ocr_settings=ocr_settings),
             DocxExtractor(),
             CodeExtractor(),
             JsonExtractor(),

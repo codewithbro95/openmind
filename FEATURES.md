@@ -84,6 +84,7 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 - Text extraction.
 - Markdown extraction.
 - PDF extraction with `pypdf`.
+- Automatic scanned-PDF OCR fallback with local RapidOCR + ONNX Runtime.
 - DOCX extraction with `python-docx`.
 - CSV extraction with `pandas`.
 - HTML extraction with BeautifulSoup.
@@ -98,10 +99,11 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 - Metadata-first discovery to avoid hashing every file before indexing starts.
 - Content hashing only when a file may have changed.
 - Explicit already-indexed reporting for unchanged files that remain accessible.
+- Foreground indexing reports skipped/error files with the extraction reason.
 
 ### LM Studio Provider
 
-- LM Studio is the only user-facing v0.2 provider.
+- LM Studio is the only user-facing `0.0.3` provider.
 - Native LM Studio REST model listing:
   - `GET /api/v1/models`
 - Native LM Studio model loading:
@@ -142,6 +144,7 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 - Uses selected LM Studio chat model.
 - Uses selected LM Studio embedding model for retrieval.
 - Handles LM Studio errors without Python tracebacks.
+- Falls back to retrieved snippets if the local model returns no visible answer text.
 
 ### Interactive Ask
 
@@ -206,13 +209,13 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 
 - `data/` folder with local indexing fixtures.
 - Includes text, Markdown, JSON, CSV, HTML, JavaScript, PDF, PNG, and JPEG samples.
-- Only supported document-first formats and PDFs are indexed in v0.2.
+- Only supported document-first formats and PDFs are indexed in `0.0.3`.
 
 ## Known Limits
 
 - Pause and stop cannot interrupt a file already inside extraction or an LM Studio embedding request.
 - Image files are not indexed.
-- No OCR yet.
+- Default scanned-PDF OCR can be installed through `uv`; optional OCRmyPDF mode still needs local OCRmyPDF, Tesseract, and Ghostscript.
 - No persistent chat history yet.
 - No file watcher yet.
 - No ranking tuning beyond vector search.
@@ -226,7 +229,7 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 
 ## Roadmap
 
-### v0.2.x Stabilization
+### 0.0.x Stabilization
 
 - Improve indexing error reporting.
 - Add failed-file inspection command.
@@ -238,7 +241,7 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 - Add faster cancellation checks around embedding batches.
 - Add clearer model-loaded status.
 
-### v0.3 Retrieval Quality
+### 0.0.4 Retrieval Quality
 
 - Hybrid search: vector plus keyword/BM25.
 - Better snippets around matched content.
@@ -248,7 +251,7 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 - Better PDF page metadata.
 - Better CSV/table summaries.
 
-### v0.4 Local Memory Quality
+### 0.0.5 Local Memory Quality
 
 - Persistent conversation sessions.
 - Session list/resume/delete commands.
@@ -257,15 +260,16 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 - Answer confidence and missing-evidence notices.
 - Per-source indexing policies.
 
-### v0.5 File Coverage
+### 0.0.6 File Coverage
 
-- OCR for screenshots and scanned PDFs.
+- OCR for screenshots and image files.
+- Advanced OCR backend option such as PaddleOCR.
 - Image metadata indexing.
 - Audio transcript ingestion.
 - Email export ingestion.
 - More document formats.
 
-### v0.6 Local Service
+### 0.0.7 Local Service
 
 - FastAPI local API.
 - Local web UI or desktop UI can connect to the same engine.

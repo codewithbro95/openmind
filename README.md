@@ -54,7 +54,7 @@ See [FEATURES.md](FEATURES.md) for the complete shipped feature list and roadmap
 - LM Studio for local chat and embedding models
 - macOS, Linux, or another Python-supported environment
 
-OpenMind Core v0.2 uses LM Studio as its only user-facing provider. The older Sentence Transformers provider remains only as a development and test fallback.
+OpenMind Core `0.0.3` uses LM Studio as its only user-facing provider. The older Sentence Transformers provider remains only as a development and test fallback.
 
 ## Install
 
@@ -381,7 +381,7 @@ Simple way to think about it:
 
 OpenMind uses a model provider abstraction for embeddings and answers.
 
-In v0.2, the only implemented provider is LM Studio. OpenMind talks to LM Studio's local server endpoint; it does not use the LM Studio chat interface.
+In `0.0.3`, the only implemented user-facing provider is LM Studio. OpenMind talks to LM Studio's local server endpoint; it does not use the LM Studio chat interface.
 
 OpenMind uses the provider endpoint for:
 
@@ -435,6 +435,8 @@ OpenMind currently indexes:
 
 OpenMind is document-first by default. It does not index source code, JSON config files, package metadata, app asset catalogs, or other low-level project internals unless a future opt-in mode is added. High-level project documents such as `README.md`, Markdown notes, PDFs, DOCX files, CSVs, and HTML docs can still be indexed.
 
+PDF extraction first uses the normal embedded text layer. If a PDF looks scanned or the extracted text is too sparse, OpenMind automatically tries local OCR with RapidOCR + ONNX Runtime and then continues the normal indexing pipeline.
+
 It ignores noisy folders such as:
 
 ```text
@@ -453,7 +455,36 @@ Assets.xcassets
 hidden folders
 ```
 
-Image files are included in the sample `data/` directory for realism, but v0.2 does not index image content or run OCR.
+Image files are included in the sample `data/` directory for realism, but OpenMind does not index standalone image content or run screenshot OCR yet.
+
+## OCR Fallback
+
+OCR is automatic for weak or scanned PDFs. No CLI flag is needed.
+
+OpenMind uses RapidOCR with ONNX Runtime as the default OCR backend. It renders PDF pages locally with `pypdfium2`, runs OCR locally, and continues the same normalize/chunk/embed/store pipeline.
+
+These Python OCR dependencies are installed by the normal project install:
+
+```bash
+uv pip install -e ".[dev]"
+```
+
+OCRmyPDF is still supported as an optional backend for users who prefer it. That mode requires OCRmyPDF, Tesseract, and Ghostscript installed separately:
+
+```bash
+brew install ocrmypdf tesseract ghostscript
+```
+
+OCR config lives in `~/.openmind/config.toml`:
+
+```toml
+[extraction.ocr]
+enabled = true
+backend = "rapidocr"
+min_text_chars_per_page = 80
+```
+
+If OCR dependencies are missing or an optional OCR backend is unavailable, OpenMind does not crash the indexing run. It records a clear extraction error for that file and continues with the rest of the source.
 
 ## Search Mode
 

@@ -1,10 +1,10 @@
-# OpenMind Core v0.2 Technical Spec
+# OpenMind Core 0.0.3 Technical Spec
 
 ## Goal
 
 Build a Python CLI tool named `openmind` that creates a local AI memory over user-approved folders.
 
-OpenMind Core v0.1 must:
+OpenMind Core must:
 
 - Index local files from explicitly added folders.
 - Extract text from supported file types.
@@ -36,6 +36,7 @@ openmind-core/
 │   │   ├── base.py
 │   │   ├── text.py
 │   │   ├── pdf.py
+│   │   ├── ocr.py
 │   │   ├── docx.py
 │   │   ├── code.py
 │   │   ├── tabular.py
@@ -76,6 +77,9 @@ Runtime:
 - `sentence-transformers`
 - `pydantic`
 - `pypdf`
+- `pypdfium2`
+- `pillow`
+- `rapidocr-onnxruntime`
 - `python-docx`
 - `beautifulsoup4`
 - `pandas`
@@ -103,7 +107,7 @@ or:
 uv sync --all-extras
 ```
 
-Later, not v0.2:
+Later, not included yet:
 
 - `fastapi`
 - `uvicorn`
@@ -186,6 +190,7 @@ CREATE TABLE index_jobs (
     processed_files INTEGER DEFAULT 0,
     indexed_files INTEGER DEFAULT 0,
     skipped_files INTEGER DEFAULT 0,
+    already_indexed_files INTEGER DEFAULT 0,
     failed_files INTEGER DEFAULT 0,
     total_chunks INTEGER DEFAULT 0,
     current_file TEXT,
@@ -250,7 +255,7 @@ openmind uninstall --yes --package
 
 1. Initialize `~/.openmind` if needed.
 2. Check LM Studio at `http://localhost:1234`.
-3. Present provider selection with LM Studio as the only v0.2 option.
+3. Present provider selection with LM Studio as the only current option.
 4. Fetch `GET /api/v1/models`.
 5. Split models by `type`: `llm` for chat and `embedding` for embeddings.
 6. Ask the user to choose one chat model when available.
@@ -276,6 +281,11 @@ embedding_model = "selected-embedding-model-key"
 [indexing]
 auto_start_after_setup = true
 background = true
+
+[extraction.ocr]
+enabled = true
+backend = "rapidocr"
+min_text_chars_per_page = 80
 ```
 
 ## Uninstall Flow
@@ -359,6 +369,39 @@ class AnswerProvider:
     def answer(self, question: str, context: list[SearchResult]) -> str: ...
 ```
 
+## OCR Fallback
+
+PDF extraction is two-stage:
+
+1. Extract embedded text with `pypdf`.
+2. Measure whether the text is usable.
+3. If text is empty, too sparse, or mostly unusual characters, try local OCR.
+4. Render PDF pages with `pypdfium2` and OCR them with RapidOCR.
+5. Continue the normal pipeline: normalize, chunk, embed, and store in LanceDB.
+
+Default config:
+
+```toml
+[extraction.ocr]
+enabled = true
+backend = "rapidocr"
+min_text_chars_per_page = 80
+```
+
+OCR metadata is stored on chunks:
+
+```json
+{
+  "file_type": "pdf",
+  "extraction_method": "ocr",
+  "ocr_engine": "rapidocr-onnxruntime+pypdfium2",
+  "ocr_used": true,
+  "page_count": 12
+}
+```
+
+If OCR dependencies are missing or OCR fails, extraction records `ocr_error` metadata. The indexer marks an otherwise empty PDF as skipped with that error and continues indexing other files. Optional `ocrmypdf` backend support remains available for users who install OCRmyPDF, Tesseract, and Ghostscript separately.
+
 ## LM Studio Provider
 
 `LMStudioClient`:
@@ -401,7 +444,7 @@ OpenAI-compatible API:
 `openmind models update` re-runs provider and model selection after setup:
 
 1. Initialize OpenMind if needed.
-2. Ask for provider selection. LM Studio is the only v0.2 provider.
+2. Ask for provider selection. LM Studio is the only current provider.
 3. Fetch `GET /api/v1/models`.
 4. Split models into chat and embedding lists.
 5. Let the user choose a chat model, or search-only mode.
@@ -455,7 +498,7 @@ Default scanning is document-first. OpenMind should index human-facing files suc
 2. Search LanceDB `chunks`.
 3. Return top results with score, file path, title, chunk text snippet, and metadata.
 
-Search requires an embedding provider. In v0.2, normal setup uses LM Studio embeddings.
+Search requires an embedding provider. Normal setup uses LM Studio embeddings.
 
 ## Ask Flow
 
@@ -512,7 +555,7 @@ Progress formula:
 processed_files / total_files * 100
 ```
 
-No Celery, Redis, external queue, or daemon manager is included in v0.2.
+No Celery, Redis, external queue, or daemon manager is included.
 
 ## LM Studio Failure Handling
 

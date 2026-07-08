@@ -5,7 +5,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 DEFAULT_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
@@ -52,6 +52,10 @@ def default_config() -> str:
         "\n[indexing]\n"
         "auto_start_after_setup = true\n"
         "background = true\n"
+        "\n[extraction.ocr]\n"
+        "enabled = true\n"
+        'backend = "rapidocr"\n'
+        "min_text_chars_per_page = 80\n"
     )
 
 
@@ -71,10 +75,21 @@ class IndexingSettings(BaseModel):
     background: bool = True
 
 
+class OCRSettings(BaseModel):
+    enabled: bool = True
+    backend: str = "rapidocr"
+    min_text_chars_per_page: int = 80
+
+
+class ExtractionSettings(BaseModel):
+    ocr: OCRSettings = Field(default_factory=OCRSettings)
+
+
 class OpenMindConfig(BaseModel):
-    provider: ProviderSettings = ProviderSettings()
-    models: ModelSettings = ModelSettings()
-    indexing: IndexingSettings = IndexingSettings()
+    provider: ProviderSettings = Field(default_factory=ProviderSettings)
+    models: ModelSettings = Field(default_factory=ModelSettings)
+    indexing: IndexingSettings = Field(default_factory=IndexingSettings)
+    extraction: ExtractionSettings = Field(default_factory=ExtractionSettings)
 
     @classmethod
     def load(cls, path: Path) -> "OpenMindConfig":
@@ -100,6 +115,10 @@ class OpenMindConfig(BaseModel):
             "\n[indexing]\n"
             f"auto_start_after_setup = {_toml_bool(self.indexing.auto_start_after_setup)}\n"
             f"background = {_toml_bool(self.indexing.background)}\n"
+            "\n[extraction.ocr]\n"
+            f"enabled = {_toml_bool(self.extraction.ocr.enabled)}\n"
+            f'backend = "{_escape_toml(self.extraction.ocr.backend)}"\n'
+            f"min_text_chars_per_page = {self.extraction.ocr.min_text_chars_per_page}\n"
         )
 
 

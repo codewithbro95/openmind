@@ -42,7 +42,7 @@ class OpenMindEngine:
         self.lance = lance_store or LanceStore(self.paths.lancedb_path)
         self.sources = SourceManager(self.sqlite)
         self.scanner = FileScanner()
-        self.extractors = extractors or default_registry()
+        self.extractors = extractors or default_registry(self.config.extraction.ocr)
         self.chunker = TextChunker()
         self.embeddings = embeddings or self._build_embedding_provider()
         self.answer_provider = answer_provider or self._build_answer_provider()
@@ -57,6 +57,7 @@ class OpenMindEngine:
         self.config = OpenMindConfig.load(self.paths.config_path)
         self.embeddings = self._build_embedding_provider()
         self.answer_provider = self._build_answer_provider()
+        self.extractors = default_registry(self.config.extraction.ocr)
         return self.config
 
     def save_config(self, config: OpenMindConfig) -> None:
@@ -205,6 +206,8 @@ class OpenMindEngine:
                     already_indexed=summary.files_already_indexed,
                     failed=summary.errors,
                     chunks=summary.chunks_created,
+                    status=file_record.status,
+                    error=file_record.error,
                 )
                 current = self.sqlite.get_index_job(job_id)
                 processed = (current.processed_files if current else 0) + 1
@@ -389,7 +392,7 @@ class OpenMindEngine:
             text = normalize_text(extracted.text)
             if not text:
                 file_record.status = "skipped"
-                file_record.error = "No text extracted"
+                file_record.error = extracted.metadata.get("ocr_error") or "No text extracted"
                 self.sqlite.upsert_file(file_record)
                 summary.files_skipped += 1
                 return summary

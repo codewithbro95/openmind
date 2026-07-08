@@ -370,6 +370,60 @@ def test_lmstudio_stream_answer_shows_neutral_progress_for_hidden_reasoning():
     assert "Sources:" in chunks[-1]
 
 
+def test_lmstudio_stream_answer_falls_back_when_model_returns_no_content():
+    class EmptyStreamingClient:
+        def is_model_loaded(self, model):
+            return True
+
+        def chat_stream(self, model, messages):
+            yield LMStudioChatResult(content="", reasoning="checking")
+
+    result = SearchResult(
+        id="chunk_1",
+        path="/docs/scanned.pdf",
+        file_name="scanned.pdf",
+        title="scanned",
+        text="Missouri public water systems laboratory notice.",
+        snippet="Missouri public water systems laboratory notice.",
+        score=0.9,
+        chunk_index=0,
+    )
+
+    chunks = list(LMStudioLLMProvider(EmptyStreamingClient(), "qwen").stream_answer("Q?", [result]))
+    output = "".join(chunks)
+
+    assert "Generating..." in output
+    assert "model did not return visible answer text" in output
+    assert "Missouri public water systems" in output
+    assert "Sources:" in output
+
+
+def test_lmstudio_answer_falls_back_when_model_returns_empty_content():
+    class EmptyClient:
+        def is_model_loaded(self, model):
+            return True
+
+        def chat(self, model, messages):
+            return LMStudioChatResult(content="")
+
+    result = SearchResult(
+        id="chunk_1",
+        path="/docs/scanned.pdf",
+        file_name="scanned.pdf",
+        title="scanned",
+        text="Missouri public water systems laboratory notice.",
+        snippet="Missouri public water systems laboratory notice.",
+        score=0.9,
+        chunk_index=0,
+    )
+
+    answer = LMStudioLLMProvider(EmptyClient(), "qwen").answer("Q?", [result])
+
+    assert "model did not return visible answer text" in answer
+    assert "Missouri public water systems" in answer
+    assert "Sources:" in answer
+
+
 def test_lmstudio_messages_include_session_history():
     provider = LMStudioLLMProvider(LMStudioClient(), "qwen")
     result = SearchResult(
