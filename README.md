@@ -47,6 +47,8 @@ What is intentionally not here yet:
 
 See [FEATURES.md](FEATURES.md) for the complete shipped feature list and roadmap. See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
+GitHub Releases are published from `main` using the version in `pyproject.toml` and the matching notes in `CHANGELOG.md`.
+
 ## Requirements
 
 - Python 3.11+

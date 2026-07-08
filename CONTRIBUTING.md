@@ -154,3 +154,33 @@ If a future feature needs one of those powers, it should be explicit, opt-in, an
 ## Release Notes
 
 OpenMind uses concise, user-facing changelog entries. Write release notes as short bullets about what changed for users, not as implementation summaries.
+
+## Release Process
+
+OpenMind releases are published from `main`, not from `develop`.
+
+Before a release:
+
+- Update `pyproject.toml` with the new version.
+- Update `openmind/__init__.py` with the same version.
+- Add a short user-facing section to [CHANGELOG.md](CHANGELOG.md).
+- Keep test fixtures, internal refactors, and implementation details out of the changelog unless they affect users directly.
+- Merge the release commit from `develop` into `main`.
+
+After the release commit is on `main`, run the `Release` workflow from the GitHub Actions tab.
+
+The workflow:
+
+- Refuses to run from any branch except `main`.
+- Reads the version from `pyproject.toml`.
+- Requires the changelog to contain a matching section.
+- Runs the test suite.
+- Creates a `vX.Y.Z` git tag.
+- Publishes the GitHub Release using the matching changelog notes.
+
+For normal releases, leave the workflow inputs empty. For backfilling an older release, pass:
+
+- `version`: the older version, such as `0.0.1`.
+- `target_ref`: the commit that should be tagged for that release.
+
+Backfilled releases still require the target commit to be part of the current `main` history.

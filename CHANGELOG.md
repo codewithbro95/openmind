@@ -8,8 +8,7 @@ User-facing changes for each OpenMind Core release.
 
 ## 0.0.3 - 2026-07-08
 
-- Added automatic OCR for scanned PDFs using Python-installed local OCR.
-- Added `PublicWaterMassMailing.pdf` as scanned PDF test data.
+- Added automatic local OCR for scanned PDFs.
 - Added clearer indexing output when a file is skipped or extraction fails.
 - Added safer Ask behavior when a local model returns no visible answer text.
 - Added `openmind flush` to reset indexed memory without uninstalling.
@@ -34,7 +33,6 @@ User-facing changes for each OpenMind Core release.
 - Added developer log viewing with `openmind dev logs`.
 - Added graceful LM Studio error messages instead of Python tracebacks.
 - Added `uv` dependency management.
-- Added sample local test data in `data/`.
 - Fixed editable install issues.
 - Fixed background indexing startup, pause, stop, and progress display issues.
 
@@ -50,4 +48,3 @@ User-facing changes for each OpenMind Core release.
 - Added SQLite records for sources, files, and indexing state.
 - Added search over indexed local files.
 - Added basic ask mode with source-grounded context.
-- Added the first README, technical spec, and test suite.
