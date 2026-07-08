@@ -14,9 +14,9 @@ OpenMind is not a chatbot, desktop UI, browser extension, cloud sync service, or
 Index local files -> Search local memory -> Ask source-grounded questions
 ```
 
-## Why OpenMind
+## Why am i building this?
 
-I am building openmind because I have a lot of files on my computer, and sometimes I genuinely get lost. I forget a file I downloaded months ago, or something I saved years ago. sometims i just need an order id from a receipt i got last week, a flight number from a pdf, or a detail buried somewhere in my messy downloads folder or even across my system. I do not want to upload all of that to another app just to find it again, no. or even give access to my data to big tech companies. I want a local AI memory that quietly understands the folders I already have existing on my system, works in the background, and helps me ask my own computer what it already has, that's it
+I am building this because I have a lot of files on my computer, and sometimes I genuinely get lost. I forget a file I downloaded months ago, or something I saved years ago. sometims i just need an order id from a receipt i got last week, a flight number from a pdf, or a detail buried somewhere in my messy downloads folder or even across my system. I do not want to upload all of that to another app just to find it again, no. or even give access to my data to big tech companies. I want a local AI memory that quietly understands the folders I already have existing on my system, works in the background, and helps me ask my own computer what it already has, that's it
 
 ## Current Status
 
