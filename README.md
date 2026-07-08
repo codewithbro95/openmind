@@ -16,24 +16,7 @@ Index local files -> Search local memory -> Ask source-grounded questions
 
 ## Why OpenMind
 
-Most AI file tools start with "upload your documents." OpenMind starts with a different premise:
-
-Your files should stay where they are.
-
-OpenMind is built around a simple local-first loop:
-
-```text
-Local file
-  -> extract text
-  -> clean text
-  -> split into chunks
-  -> create embeddings
-  -> store in LanceDB
-  -> search relevant chunks
-  -> answer with sources
-```
-
-The goal is to become an open local memory layer for personal AI systems. Not the model. The memory layer.
+I am building openmind because I have a lot of files on my computer, and sometimes I genuinely get lost. I forget a file I downloaded months ago, or something I saved years ago. sometims i just need an order id from a receipt i got last week, a flight number from a pdf, or a detail buried somewhere in my messy downloads folder or even across my system. I do not want to upload all of that to another app just to find it again, no. or even give access to my data to big tech companies. I want a local AI memory that quietly understands the folders I already have existing on my system, works in the background, and helps me ask my own computer what it already has, that's it
 
 ## Current Status
 
