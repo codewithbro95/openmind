@@ -300,6 +300,8 @@ class OpenMindEngine:
     ) -> Iterator[str]:
         self._log("ask.start", "Streaming answer", question=question, limit=limit)
         results = self.search(self._conversation_search_query(question, history), limit=limit)
+        if results:
+            yield _retrieval_preamble(results)
         for chunk in self.answer_provider.stream_answer(
             question,
             results,
@@ -458,3 +460,23 @@ def _same_file_metadata(existing, candidate) -> bool:
         existing.size == candidate.size
         and abs(existing.modified_at - candidate.modified_at) < 0.000001
     )
+
+
+def _retrieval_preamble(results: list[SearchResult]) -> str:
+    sources: list[str] = []
+    seen: set[str] = set()
+    for result in results:
+        if result.path in seen:
+            continue
+        seen.add(result.path)
+        sources.append(result.path)
+        if len(sources) == 3:
+            break
+    lines = [f"Found {len(results)} relevant chunk(s) in local memory."]
+    if sources:
+        lines.append("Top source(s):")
+        lines.extend(f"- {source}" for source in sources)
+    lines.append("")
+    lines.append("Generating answer:")
+    lines.append("")
+    return "\n".join(lines)

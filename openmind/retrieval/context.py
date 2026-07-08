@@ -3,11 +3,16 @@ from __future__ import annotations
 from openmind.core.models import SearchResult
 
 
-def build_context(results: list[SearchResult], max_chars: int = 9000) -> str:
+def build_context(results: list[SearchResult], max_chars: int = 10000) -> str:
     parts: list[str] = []
     used = 0
     for index, result in enumerate(results, start=1):
-        header = f"[{index}] {result.path} (chunk {result.chunk_index})"
+        header = (
+            f"[Source {index}]\n"
+            f"Path: {result.path}\n"
+            f"Chunk: {result.chunk_index}\n"
+            f"Retrieval score: {result.score:.2f}"
+        )
         body = result.text.strip()
         block = f"{header}\n{body}"
         if used + len(block) > max_chars:

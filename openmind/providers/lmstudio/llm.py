@@ -83,6 +83,7 @@ class LMStudioLLMProvider(AnswerProvider):
             thinking_started = False
             answer_started = False
             thinking_seen = False
+            hidden_thinking_indicator_seen = False
 
             for delta in stream:
                 if show_thinking and delta.reasoning:
@@ -91,13 +92,21 @@ class LMStudioLLMProvider(AnswerProvider):
                         yield "Thinking:\n"
                     thinking_seen = True
                     yield delta.reasoning
+                elif delta.reasoning and not hidden_thinking_indicator_seen and not answer_started:
+                    hidden_thinking_indicator_seen = True
+                    yield "Generating...\n"
                 if delta.content:
-                    if show_thinking and not answer_started:
+                    if not answer_started and hidden_thinking_indicator_seen and not show_thinking:
+                        answer_started = True
+                        yield "\nAnswer:\n"
+                    elif show_thinking and not answer_started:
                         answer_started = True
                         if thinking_started:
                             yield "\n\nAnswer:\n"
                         else:
                             yield "Answer:\n"
+                    else:
+                        answer_started = True
                     yield delta.content
 
             if show_thinking and not thinking_seen:
@@ -125,10 +134,16 @@ class LMStudioLLMProvider(AnswerProvider):
             {
                 "role": "system",
                 "content": (
-                    "You answer questions using only the provided local file context. "
-                    "If the context does not support a claim, say you did not find it. "
-                    "Always keep the answer concise and source-grounded. "
-                    "Use the prior conversation only to understand follow-up questions."
+                    "You are OpenMind's local answer layer. OpenMind has already searched "
+                    "the user's indexed local files and provided the retrieved evidence below. "
+                    "Use that evidence to answer the user's question. Do not say you cannot "
+                    "access files, documents, or local data when relevant evidence is present "
+                    "in the provided context. If the evidence is partial, answer what it "
+                    "supports and say what was not found. If the evidence truly does not "
+                    "answer the question, say that clearly. Keep answers concise, grounded, "
+                    "and tied to source paths. Use prior conversation only to understand "
+                    "follow-up questions. Do not introduce yourself, name the model, or "
+                    "describe your identity."
                 ),
             },
         ]
@@ -139,8 +154,13 @@ class LMStudioLLMProvider(AnswerProvider):
                 "role": "user",
                 "content": (
                     f"Question:\n{question}\n\n"
-                    f"Local file context:\n{context_text}\n\n"
-                    "Answer with a short summary and mention the relevant source paths."
+                    "Retrieved local file evidence:\n"
+                    "The following excerpts come from files OpenMind already indexed and "
+                    "retrieved for this question. Treat them as the available file evidence.\n\n"
+                    f"{context_text}\n\n"
+                    "Answer from the retrieved evidence. Start with the direct answer, then "
+                    "mention the relevant source path or paths. Do not invent details outside "
+                    "the evidence."
                 ),
             }
         )
