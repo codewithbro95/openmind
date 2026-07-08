@@ -238,6 +238,10 @@ openmind provider status
 openmind search "<query>" --limit 5
 openmind ask "<question>" --limit 5
 openmind status
+openmind flush
+openmind flush --yes --include-sources
+openmind uninstall
+openmind uninstall --yes --package
 ```
 
 ## Setup Flow
@@ -273,6 +277,71 @@ embedding_model = "selected-embedding-model-key"
 auto_start_after_setup = true
 background = true
 ```
+
+## Uninstall Flow
+
+`openmind uninstall` removes OpenMind-owned local data from the configured app home.
+
+It deletes:
+
+- `config.toml`
+- `openmind.sqlite`
+- `lancedb/`
+- `logs/`
+- any other files under `~/.openmind` or `OPENMIND_HOME`
+
+It must not delete:
+
+- user source folders
+- LM Studio
+- downloaded provider models
+- the current Python environment unless `--package` is explicitly passed
+
+Behavior:
+
+1. Show the resolved app home and files that will be removed.
+2. Refuse obviously unsafe app home paths such as `/`, the user's home directory, or the current working directory.
+3. Require confirmation unless `--yes` is passed.
+4. Support `--dry-run`.
+5. Request an active indexing job to stop before deletion.
+6. Delete the app home directory.
+7. If `--package` is passed, run `python -m pip uninstall -y openmind-core` in the current Python environment.
+8. If `--package` is not passed, tell the user how to remove the installed Python package separately.
+
+## Flush Flow
+
+`openmind flush` resets indexed memory and indexing state without uninstalling OpenMind.
+
+It deletes:
+
+- SQLite `files` records
+- SQLite `index_jobs` records
+- SQLite `index_runs` records
+- LanceDB vectors and chunks
+- log files
+
+It keeps by default:
+
+- `config.toml`
+- saved source folder records
+- user source folders and files
+- provider apps and downloaded models
+- the installed Python package
+
+If `--include-sources` is passed, it also deletes saved source folder records from SQLite. It still must not delete the actual folders or files that were indexed.
+
+Behavior:
+
+1. Show the resolved app home and what will be removed.
+2. Show current counts for sources, file records, indexed files, index jobs, and index runs.
+3. Require confirmation unless `--yes` is passed.
+4. Support `--dry-run`.
+5. Request an active indexing job to stop and wait briefly before deleting state.
+6. Abort if the active indexing job does not stop.
+7. Clear SQLite index state.
+8. Reset the LanceDB directory.
+9. Clear log files.
+10. Tell the user to run `openmind index start` to rebuild memory.
 
 ## Core Interfaces
 
@@ -361,16 +430,24 @@ Interactive ask:
 1. Load enabled sources from SQLite.
 2. Discovery phase: scan each source recursively and count supported files.
 3. Ignore unsupported files and noisy folders.
-4. Indexing phase: compute metadata and content hash.
-5. Skip unchanged files that were already indexed.
-6. Extract text with the matching extractor.
-7. Normalize text.
-8. Split text into chunks.
-9. Embed chunks with the selected LM Studio embedding model.
-10. Delete old vectors for the file from LanceDB.
-11. Store new chunks in LanceDB.
-12. Upsert file status in SQLite.
-13. Update `index_jobs` progress after each file.
+4. Indexing phase: compare path, size, and modified time against SQLite records.
+5. Skip unchanged files that were already indexed, and count them as already indexed.
+6. If metadata changed, compute content hash.
+7. If content hash is unchanged, update file metadata and keep existing chunks.
+8. If content hash changed or the file is new, extract text with the matching extractor.
+9. Normalize text.
+10. Split text into chunks.
+11. Embed chunks with the selected LM Studio embedding model.
+12. Delete old vectors for the file from LanceDB.
+13. Store new chunks in LanceDB.
+14. Upsert file status in SQLite.
+15. Update `index_jobs` progress after each file, including the already-indexed count.
+
+OpenMind should tell the user when unchanged files are already indexed and accessible. This is separate from generic skipped files, because skipped files may also include files where no text could be extracted.
+
+Discovery should be metadata-first. It should not compute content hashes for every discovered file before indexing starts, because that makes large folders appear stuck and wastes work for unchanged files.
+
+Default scanning is document-first. OpenMind should index human-facing files such as `.txt`, `.md`, `.pdf`, `.docx`, `.csv`, and `.html`. It should not index source code, JSON config/package files, generated build artifacts, app asset catalogs such as `Assets.xcassets`, dependency folders, or other low-level project internals unless a future opt-in code indexing mode is added.
 
 ## Search Flow
 

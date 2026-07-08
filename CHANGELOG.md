@@ -6,6 +6,12 @@ User-facing changes for each OpenMind Core release.
 
 - Added `openmind models update` to change saved LM Studio chat and embedding models.
 - Added an option to save model changes without loading them immediately.
+- Added `openmind flush` to reset indexed memory without uninstalling.
+- Added `openmind uninstall` to remove OpenMind-owned local data.
+- Added explicit already-indexed reporting for unchanged files during indexing.
+- Improved duplicate source feedback when a folder was already added.
+- Improved incremental indexing so unchanged files skip hashing, extraction, embedding, and vector writes.
+- Changed default scanning to skip source code, JSON config, and low-level project internals.
 - Changed model loading to skip models that are already loaded in LM Studio.
 
 ## 0.2.0 - 2026-07-04

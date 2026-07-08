@@ -75,6 +75,7 @@ class IndexSummary(BaseModel):
     files_seen: int = 0
     files_indexed: int = 0
     files_skipped: int = 0
+    files_already_indexed: int = 0
     errors: int = 0
     chunks_created: int = 0
 
@@ -94,6 +95,7 @@ class IndexJob(BaseModel):
     processed_files: int = 0
     indexed_files: int = 0
     skipped_files: int = 0
+    already_indexed_files: int = 0
     failed_files: int = 0
     total_chunks: int = 0
     current_file: str | None = None

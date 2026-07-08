@@ -4,12 +4,14 @@ import json
 import shutil
 import sqlite3
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.live import Live
+from rich.progress import Progress
 from rich.prompt import Prompt
 from rich.table import Table
 
@@ -21,7 +23,7 @@ from openmind.core.config import (
     ProviderSettings,
 )
 from openmind.core.engine import OpenMindEngine
-from openmind.core.models import IndexJob
+from openmind.core.models import IndexJob, IndexSummary
 from openmind.providers.lmstudio.errors import LMStudioConnectionError, LMStudioError
 from openmind.providers.lmstudio.models import LMStudioModel, split_models
 
@@ -119,9 +121,13 @@ def setup_command() -> None:
 
 @source_app.command("add")
 def source_add(path: str) -> None:
+    current = engine()
     try:
-        source = engine().add_source(path)
-    except (FileNotFoundError, NotADirectoryError, sqlite3.IntegrityError) as exc:
+        source = current.add_source(path)
+    except sqlite3.IntegrityError:
+        _print_existing_source_status(current, path)
+        return
+    except (FileNotFoundError, NotADirectoryError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     console.print(f"[green]Added source[/green] {source.id}: {source.path}")
 
@@ -143,13 +149,38 @@ def source_remove(source_id: str) -> None:
 def index_command(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is not None:
         return
-    summary = engine().index()
+    current = engine()
+    current.init()
+    summary = IndexSummary()
+    console.print("Discovering supported files...")
+    records = current.discover_files()
+    summary.files_seen = len(records)
+    console.print(f"Discovered {len(records)} supported file(s).")
+    with Progress(console=console) as progress:
+        task = progress.add_task("Checking files", total=len(records))
+        for file_record in records:
+            progress.update(task, description=f"Checking {file_record.name}")
+            file_summary = current._index_file(file_record)
+            summary.files_indexed += file_summary.files_indexed
+            summary.files_skipped += file_summary.files_skipped
+            summary.files_already_indexed += file_summary.files_already_indexed
+            summary.errors += file_summary.errors
+            summary.chunks_created += file_summary.chunks_created
+            progress.advance(task)
     console.print("[green]Index complete[/green]")
     console.print(f"Files seen: {summary.files_seen}")
     console.print(f"Files indexed: {summary.files_indexed}")
     console.print(f"Files skipped: {summary.files_skipped}")
+    console.print(f"Files already indexed: {summary.files_already_indexed}")
     console.print(f"Files failed: {summary.errors}")
     console.print(f"Chunks created: {summary.chunks_created}")
+    if summary.files_already_indexed:
+        console.print(
+            "[green]"
+            f"{summary.files_already_indexed} unchanged file(s) were already indexed "
+            "and are accessible in OpenMind."
+            "[/green]"
+        )
 
 
 @index_app.command("start")
@@ -432,6 +463,169 @@ def status_command() -> None:
     console.print(table)
 
 
+@app.command("flush")
+def flush_command(
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip the confirmation prompt.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show what would be removed without deleting anything.",
+    ),
+    include_sources: bool = typer.Option(
+        False,
+        "--include-sources",
+        help="Also remove saved source folder records. User files are never deleted.",
+    ),
+    wait: float = typer.Option(
+        10.0,
+        "--wait",
+        min=0.0,
+        help="Seconds to wait for an active index job to stop.",
+    ),
+) -> None:
+    current = engine()
+    home = current.paths.home.expanduser().resolve()
+    _validate_uninstall_home(home)
+
+    console.print("[bold]OpenMind flush[/bold]")
+    console.print("This clears OpenMind's indexed memory and indexing state.")
+    console.print(f"App home: {home}")
+    console.print()
+    console.print("Will remove:")
+    console.print(f"- SQLite file records and indexing jobs: {current.paths.sqlite_path}")
+    console.print(f"- LanceDB vectors and chunks: {current.paths.lancedb_path}")
+    console.print(f"- Logs: {current.paths.logs_path}")
+    if include_sources:
+        console.print("- Saved source folder records")
+    console.print()
+    console.print("Will keep:")
+    console.print(f"- Config: {current.paths.config_path}")
+    if not include_sources:
+        console.print("- Saved source folder records")
+    console.print("- User source folders and files")
+    console.print("- Installed Python package")
+    console.print("- Provider apps and downloaded models")
+
+    if not home.exists():
+        console.print("[yellow]OpenMind app home does not exist. Nothing to flush.[/yellow]")
+        return
+
+    current.init()
+    counts = current.sqlite.index_state_counts()
+    console.print()
+    console.print("Current indexed state:")
+    console.print(f"- Sources: {counts['sources']}")
+    console.print(f"- File records: {counts['files']}")
+    console.print(f"- Indexed files: {counts['indexed_files']}")
+    console.print(f"- Index jobs: {counts['index_jobs']}")
+    console.print(f"- Index runs: {counts['index_runs']}")
+
+    if dry_run:
+        console.print("[yellow]Dry run only. No indexed data was removed.[/yellow]")
+        return
+
+    if not yes:
+        prompt = "Flush OpenMind indexed memory and indexing state"
+        if include_sources:
+            prompt += ", including saved source records"
+        confirmed = typer.confirm(prompt + "?", default=False)
+        if not confirmed:
+            console.print("[yellow]Flush cancelled.[/yellow]")
+            return
+
+    if not _stop_active_index_job_for_flush(current, wait_seconds=wait):
+        console.print(
+            "[red]An index job is still active. Run `openmind index stop`, wait for it "
+            "to stop, then run `openmind flush` again.[/red]"
+        )
+        raise typer.Exit(1)
+
+    removed_counts = current.sqlite.flush_index_state(include_sources=include_sources)
+    _reset_lancedb(current.paths.lancedb_path)
+    removed_logs = _clear_log_files(current.paths.logs_path)
+
+    console.print("[green]OpenMind indexed memory flushed.[/green]")
+    console.print(f"Removed file records: {removed_counts['files']}")
+    console.print(f"Removed indexed file records: {removed_counts['indexed_files']}")
+    console.print(f"Removed index jobs: {removed_counts['index_jobs']}")
+    console.print(f"Removed index runs: {removed_counts['index_runs']}")
+    if include_sources:
+        console.print(f"Removed source records: {removed_counts['sources']}")
+    console.print(f"Removed log files: {removed_logs}")
+    console.print("User files were not deleted.")
+    console.print("Run `openmind index start` to build memory again.")
+
+
+@app.command("uninstall")
+def uninstall_command(
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip the confirmation prompt.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show what would be removed without deleting anything.",
+    ),
+    remove_package: bool = typer.Option(
+        False,
+        "--package",
+        help="Also uninstall the openmind-core package from the current Python environment.",
+    ),
+) -> None:
+    current = engine()
+    home = current.paths.home.expanduser().resolve()
+    _validate_uninstall_home(home)
+
+    console.print("[bold]OpenMind uninstall[/bold]")
+    console.print("This removes OpenMind-owned local data:")
+    console.print(f"- App home: {home}")
+    console.print(f"- Config: {current.paths.config_path}")
+    console.print(f"- SQLite state: {current.paths.sqlite_path}")
+    console.print(f"- LanceDB memory: {current.paths.lancedb_path}")
+    console.print(f"- Logs: {current.paths.logs_path}")
+    if remove_package:
+        console.print("- Python package: openmind-core")
+    console.print()
+    console.print("This does not delete user source folders, LM Studio, or downloaded models.")
+
+    if not home.exists():
+        console.print("[yellow]OpenMind app home does not exist. Nothing to remove.[/yellow]")
+        if not remove_package:
+            return
+
+    if dry_run:
+        console.print("[yellow]Dry run only. No files were removed.[/yellow]")
+        return
+
+    if not yes:
+        prompt = "Delete OpenMind local data"
+        if remove_package:
+            prompt += " and uninstall the Python package"
+        confirmed = typer.confirm(prompt + "?", default=False)
+        if not confirmed:
+            console.print("[yellow]Uninstall cancelled.[/yellow]")
+            return
+
+    if home.exists():
+        _request_index_stop_before_uninstall(current)
+        shutil.rmtree(home)
+        console.print("[green]OpenMind local data removed.[/green]")
+
+    if remove_package:
+        _uninstall_python_package()
+    else:
+        console.print("To remove the installed Python package from this environment, run:")
+        console.print("uv pip uninstall openmind-core")
+
+
 def _interactive_ask(limit: int, stream: bool, show_thinking: bool) -> None:
     current = engine()
     history: list[dict[str, str]] = []
@@ -566,6 +760,101 @@ def _print_model_load_summary(results: list[dict]) -> None:
     )
 
 
+def _print_existing_source_status(current: OpenMindEngine, path: str) -> None:
+    source_path = Path(path).expanduser().resolve()
+    existing = next((source for source in current.list_sources() if source.path == str(source_path)), None)
+    if existing is None:
+        console.print(f"[yellow]Source already exists:[/yellow] {source_path}")
+        return
+
+    indexed_count = current.sqlite.indexed_file_count_for_source(existing.id)
+    console.print(f"[yellow]Source already added[/yellow] {existing.id}: {existing.path}")
+    if indexed_count:
+        console.print(
+            "[green]"
+            f"{indexed_count} indexed file(s) from this source are already accessible "
+            "in OpenMind."
+            "[/green]"
+        )
+    else:
+        console.print("This source is registered but does not have indexed files yet.")
+
+
+def _request_index_stop_before_uninstall(current: OpenMindEngine) -> None:
+    try:
+        job = current.index_job_status()
+    except sqlite3.Error:
+        return
+    if job is None or job.status in {"completed", "failed", "stopped"}:
+        return
+    stopped = current.stop_index_job()
+    if stopped and stopped.status in {"stop_requested", "stopped"}:
+        console.print("[yellow]Requested active index job to stop before uninstalling.[/yellow]")
+
+
+def _stop_active_index_job_for_flush(current: OpenMindEngine, wait_seconds: float) -> bool:
+    try:
+        job = current.index_job_status()
+    except sqlite3.Error:
+        return True
+    if job is None or _is_terminal_index_status(job.status):
+        return True
+
+    console.print("[yellow]Requesting active index job to stop before flushing.[/yellow]")
+    current.stop_index_job()
+    deadline = time.time() + wait_seconds
+    while time.time() <= deadline:
+        updated = current.index_job_status()
+        if updated is None or _is_terminal_index_status(updated.status):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def _is_terminal_index_status(status: str) -> bool:
+    return status in {"completed", "failed", "stopped"}
+
+
+def _reset_lancedb(path: Path) -> None:
+    if path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def _clear_log_files(path: Path) -> int:
+    if not path.exists():
+        path.mkdir(parents=True, exist_ok=True)
+        return 0
+    removed = 0
+    for log_file in path.glob("*.log"):
+        if log_file.is_file():
+            log_file.unlink()
+            removed += 1
+    return removed
+
+
+def _validate_uninstall_home(home: Path) -> None:
+    unsafe_paths = {Path("/").resolve(), Path.home().resolve(), Path.cwd().resolve()}
+    if home in unsafe_paths:
+        raise typer.BadParameter(f"Refusing to uninstall unsafe OpenMind home: {home}")
+    if home.parent == home:
+        raise typer.BadParameter(f"Refusing to uninstall unsafe OpenMind home: {home}")
+
+
+def _uninstall_python_package() -> None:
+    console.print("Uninstalling openmind-core from the current Python environment...")
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "uninstall", "-y", "openmind-core"],
+        check=False,
+    )
+    if result.returncode == 0:
+        console.print("[green]openmind-core package removed from this environment.[/green]")
+    else:
+        console.print("[yellow]Could not uninstall openmind-core automatically.[/yellow]")
+        console.print("You can remove it manually with:")
+        console.print("uv pip uninstall openmind-core")
+
+
 def _choose_sources(current: OpenMindEngine) -> None:
     candidates = [
         Path("~/Documents").expanduser(),
@@ -639,6 +928,7 @@ def _index_job_table(job: IndexJob) -> Table:
     table.add_row("Files processed", str(job.processed_files))
     table.add_row("Files indexed", str(job.indexed_files))
     table.add_row("Files skipped", str(job.skipped_files))
+    table.add_row("Already indexed", str(job.already_indexed_files))
     table.add_row("Files failed", str(job.failed_files))
     table.add_row("Chunks created", str(job.total_chunks))
     table.add_row("Progress", f"{job.progress_percent:.1f}%")

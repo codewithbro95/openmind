@@ -16,24 +16,7 @@ Index local files -> Search local memory -> Ask source-grounded questions
 
 ## Why OpenMind
 
-Most AI file tools start with "upload your documents." OpenMind starts with a different premise:
-
-Your files should stay where they are.
-
-OpenMind is built around a simple local-first loop:
-
-```text
-Local file
-  -> extract text
-  -> clean text
-  -> split into chunks
-  -> create embeddings
-  -> store in LanceDB
-  -> search relevant chunks
-  -> answer with sources
-```
-
-The goal is to become an open local memory layer for personal AI systems. Not the model. The memory layer.
+I am building openmind because I have a lot of files on my computer, and sometimes I genuinely get lost. I forget a file I downloaded months ago, or something I saved years ago. sometims i just need an order id from a receipt i got last week, a flight number from a pdf, or a detail buried somewhere in my messy downloads folder or even across my system. I do not want to upload all of that to another app just to find it again, no. or even give access to my data to big tech companies. I want a local AI memory that quietly understands the folders I already have existing on my system, works in the background, and helps me ask my own computer what it already has, that's it
 
 ## Current Status
 
@@ -43,7 +26,7 @@ What works today:
 
 - Local app storage under `~/.openmind`.
 - User-approved folder sources.
-- File extraction for common text, code, PDF, DOCX, CSV, JSON, and HTML files.
+- File extraction for common text, PDF, DOCX, CSV, Markdown, and HTML files.
 - LanceDB vector storage.
 - SQLite source, file, and indexing job records.
 - LM Studio as the user-facing local AI provider.
@@ -134,6 +117,8 @@ Watch indexing progress:
 openmind index status
 ```
 
+The live status table includes an `Already indexed` count for unchanged files that were indexed before and are still accessible.
+
 Search your local memory:
 
 ```bash
@@ -165,6 +150,14 @@ Lower-level initialization:
 ```bash
 openmind init
 openmind status
+openmind flush
+openmind flush --dry-run
+openmind flush --yes
+openmind flush --yes --include-sources
+openmind uninstall
+openmind uninstall --dry-run
+openmind uninstall --yes
+openmind uninstall --yes --package
 ```
 
 Source management:
@@ -174,6 +167,8 @@ openmind source add ~/Documents
 openmind source list
 openmind source remove <source_id>
 ```
+
+If a folder was already added, OpenMind tells you it is already registered and reports indexed files that are already accessible.
 
 Indexing:
 
@@ -186,6 +181,10 @@ openmind index pause
 openmind index resume
 openmind index stop
 ```
+
+If an unchanged file was indexed before, OpenMind reports it as already indexed and keeps it available for search and ask.
+
+OpenMind uses file path, size, modified time, and content hash to avoid unnecessary work. Unchanged files are not extracted, embedded, or stored again. If a file's metadata changes, OpenMind checks the content hash and only re-indexes when the content actually changed.
 
 Search:
 
@@ -311,7 +310,7 @@ flowchart TD
     Sources --> SQLite["SQLite<br/>sources, files, jobs, status"]
 
     Indexing --> Scanner["File Scanner<br/>user-approved folders only"]
-    Scanner --> Extractors["Extractors<br/>txt, md, pdf, docx, code, json, csv, html"]
+    Scanner --> Extractors["Extractors<br/>txt, md, pdf, docx, csv, html"]
     Extractors --> Normalizer["Normalize Text"]
     Normalizer --> Chunker["Chunk Text"]
     Chunker --> Embeddings["Embedding Provider<br/>calls local embedding endpoint"]
@@ -430,13 +429,11 @@ OpenMind currently indexes:
 .md
 .pdf
 .docx
-.py
-.js
-.ts
-.json
 .csv
 .html
 ```
+
+OpenMind is document-first by default. It does not index source code, JSON config files, package metadata, app asset catalogs, or other low-level project internals unless a future opt-in mode is added. High-level project documents such as `README.md`, Markdown notes, PDFs, DOCX files, CSVs, and HTML docs can still be indexed.
 
 It ignores noisy folders such as:
 
@@ -450,6 +447,9 @@ __pycache__
 dist
 build
 .cache
+target
+coverage
+Assets.xcassets
 hidden folders
 ```
 
@@ -468,9 +468,9 @@ openmind search "cabin trip checklist"
 Output is shaped like:
 
 ```text
-1. ~/Documents/checklist/checklist-notes.md
+1. ~/Documents/Holiday/checklist.md
    Score: 0.91
-   Snippet: The check-in checklist is scheduled...
+   Snippet: The packing checklist includes...
 ```
 
 If search is bad, answers will be bad. OpenMind treats search quality as the foundation.
@@ -631,9 +631,37 @@ For development and tests, use a separate home:
 OPENMIND_HOME=/tmp/openmind-dev openmind status
 ```
 
+Reset indexed memory without uninstalling:
+
+```bash
+openmind flush
+```
+
+This clears OpenMind's indexed memory and indexing state, including SQLite file records, index jobs, LanceDB vectors/chunks, and log files. It keeps `config.toml` and saved source folders by default, so you can run `openmind index start` again from a clean memory state. To also clear saved source folder records:
+
+```bash
+openmind flush --yes --include-sources
+```
+
+Flush never deletes the actual files or folders you indexed.
+
+Remove OpenMind-owned local data:
+
+```bash
+openmind uninstall
+```
+
+This deletes the OpenMind app home, including `config.toml`, `openmind.sqlite`, `lancedb/`, and `logs/`. It does not delete user source folders, LM Studio, or downloaded models.
+
+To remove the installed package from the current Python environment in the same command:
+
+```bash
+openmind uninstall --yes --package
+```
+
 ## Test Data
 
-This repo includes a small `data/` folder with notes, Markdown, JSON, CSV, HTML, JavaScript, a sample PDF, and images.
+This repo includes a small `data/` folder with notes, Markdown, JSON, CSV, HTML, JavaScript, a sample PDF, and images. Only supported document-first formats are indexed by default.
 
 Try it:
 

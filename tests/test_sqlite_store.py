@@ -48,11 +48,13 @@ def test_sqlite_store_tracks_index_jobs(tmp_path):
         processed_files=4,
         indexed_files=3,
         skipped_files=1,
+        already_indexed_files=1,
         total_chunks=12,
         current_file="/tmp/note.md",
     )
 
     assert updated.progress_percent == 40.0
+    assert updated.already_indexed_files == 1
     assert store.latest_index_job().id == "job_1"
     assert store.latest_active_index_job().status == "running"
 

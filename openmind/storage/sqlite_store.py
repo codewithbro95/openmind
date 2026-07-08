@@ -72,6 +72,7 @@ class SQLiteStore:
                   processed_files INTEGER DEFAULT 0,
                   indexed_files INTEGER DEFAULT 0,
                   skipped_files INTEGER DEFAULT 0,
+                  already_indexed_files INTEGER DEFAULT 0,
                   failed_files INTEGER DEFAULT 0,
                   total_chunks INTEGER DEFAULT 0,
                   current_file TEXT,
@@ -82,6 +83,18 @@ class SQLiteStore:
                 );
                 """
             )
+            self._ensure_column(conn, "index_jobs", "already_indexed_files", "INTEGER DEFAULT 0")
+
+    def _ensure_column(
+        self,
+        conn: sqlite3.Connection,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def add_source(self, source: Source) -> None:
         with self.connect() as conn:
@@ -118,6 +131,13 @@ class SQLiteStore:
             )
             for row in rows
         ]
+
+    def indexed_file_count_for_source(self, source_id: str) -> int:
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM files WHERE source_id = ? AND status = 'indexed'",
+                (source_id,),
+            ).fetchone()[0]
 
     def remove_source(self, source_id: str) -> bool:
         with self.connect() as conn:
@@ -184,6 +204,28 @@ class SQLiteStore:
             app_home=app_home,
         )
 
+    def index_state_counts(self) -> dict[str, int]:
+        with self.connect() as conn:
+            return {
+                "sources": conn.execute("SELECT COUNT(*) FROM sources").fetchone()[0],
+                "files": conn.execute("SELECT COUNT(*) FROM files").fetchone()[0],
+                "indexed_files": conn.execute(
+                    "SELECT COUNT(*) FROM files WHERE status = 'indexed'"
+                ).fetchone()[0],
+                "index_jobs": conn.execute("SELECT COUNT(*) FROM index_jobs").fetchone()[0],
+                "index_runs": conn.execute("SELECT COUNT(*) FROM index_runs").fetchone()[0],
+            }
+
+    def flush_index_state(self, include_sources: bool = False) -> dict[str, int]:
+        counts = self.index_state_counts()
+        with self.connect() as conn:
+            conn.execute("DELETE FROM files")
+            conn.execute("DELETE FROM index_jobs")
+            conn.execute("DELETE FROM index_runs")
+            if include_sources:
+                conn.execute("DELETE FROM sources")
+        return counts
+
     def create_index_job(self, job_id: str) -> IndexJob:
         now = utc_now()
         job = IndexJob(id=job_id, status="pending", started_at=now, updated_at=now)
@@ -192,10 +234,10 @@ class SQLiteStore:
                 """
                 INSERT INTO index_jobs (
                   id, status, total_files, processed_files, indexed_files,
-                  skipped_files, failed_files, total_chunks, current_file,
-                  error, started_at, completed_at, updated_at
+                  skipped_files, already_indexed_files, failed_files, total_chunks,
+                  current_file, error, started_at, completed_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 self._job_values(job),
             )
@@ -271,6 +313,7 @@ class SQLiteStore:
             job.processed_files,
             job.indexed_files,
             job.skipped_files,
+            job.already_indexed_files,
             job.failed_files,
             job.total_chunks,
             job.current_file,
@@ -288,6 +331,7 @@ class SQLiteStore:
             processed_files=row["processed_files"],
             indexed_files=row["indexed_files"],
             skipped_files=row["skipped_files"],
+            already_indexed_files=row["already_indexed_files"],
             failed_files=row["failed_files"],
             total_chunks=row["total_chunks"],
             current_file=row["current_file"],
