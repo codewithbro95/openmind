@@ -42,7 +42,7 @@ class OpenMindEngine:
         self.lance = lance_store or LanceStore(self.paths.lancedb_path)
         self.sources = SourceManager(self.sqlite)
         self.scanner = FileScanner()
-        self.extractors = extractors or default_registry()
+        self.extractors = extractors or default_registry(self.config.extraction.ocr)
         self.chunker = TextChunker()
         self.embeddings = embeddings or self._build_embedding_provider()
         self.answer_provider = answer_provider or self._build_answer_provider()
@@ -57,6 +57,7 @@ class OpenMindEngine:
         self.config = OpenMindConfig.load(self.paths.config_path)
         self.embeddings = self._build_embedding_provider()
         self.answer_provider = self._build_answer_provider()
+        self.extractors = default_registry(self.config.extraction.ocr)
         return self.config
 
     def save_config(self, config: OpenMindConfig) -> None:
@@ -205,6 +206,8 @@ class OpenMindEngine:
                     already_indexed=summary.files_already_indexed,
                     failed=summary.errors,
                     chunks=summary.chunks_created,
+                    status=file_record.status,
+                    error=file_record.error,
                 )
                 current = self.sqlite.get_index_job(job_id)
                 processed = (current.processed_files if current else 0) + 1
@@ -300,6 +303,8 @@ class OpenMindEngine:
     ) -> Iterator[str]:
         self._log("ask.start", "Streaming answer", question=question, limit=limit)
         results = self.search(self._conversation_search_query(question, history), limit=limit)
+        if results:
+            yield _retrieval_preamble(results)
         for chunk in self.answer_provider.stream_answer(
             question,
             results,
@@ -387,7 +392,7 @@ class OpenMindEngine:
             text = normalize_text(extracted.text)
             if not text:
                 file_record.status = "skipped"
-                file_record.error = "No text extracted"
+                file_record.error = extracted.metadata.get("ocr_error") or "No text extracted"
                 self.sqlite.upsert_file(file_record)
                 summary.files_skipped += 1
                 return summary
@@ -458,3 +463,23 @@ def _same_file_metadata(existing, candidate) -> bool:
         existing.size == candidate.size
         and abs(existing.modified_at - candidate.modified_at) < 0.000001
     )
+
+
+def _retrieval_preamble(results: list[SearchResult]) -> str:
+    sources: list[str] = []
+    seen: set[str] = set()
+    for result in results:
+        if result.path in seen:
+            continue
+        seen.add(result.path)
+        sources.append(result.path)
+        if len(sources) == 3:
+            break
+    lines = [f"Found {len(results)} relevant chunk(s) in local memory."]
+    if sources:
+        lines.append("Top source(s):")
+        lines.extend(f"- {source}" for source in sources)
+    lines.append("")
+    lines.append("Generating answer:")
+    lines.append("")
+    return "\n".join(lines)

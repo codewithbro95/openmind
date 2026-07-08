@@ -136,6 +136,8 @@ def test_lmstudio_client_reports_timeout(monkeypatch):
 
 def test_lmstudio_chat_extracts_think_block(monkeypatch):
     def fake_urlopen(request, timeout):
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["max_tokens"] == 700
         return FakeResponse(
             {
                 "choices": [
@@ -160,6 +162,7 @@ def test_lmstudio_chat_stream_parses_sse_deltas(monkeypatch):
     def fake_urlopen(request, timeout):
         body = json.loads(request.data.decode("utf-8"))
         assert body["stream"] is True
+        assert body["max_tokens"] == 700
         return FakeResponse(
             [
                 'data: {"choices":[{"delta":{"content":"Hello"}}]}\n',
@@ -181,6 +184,8 @@ def test_lmstudio_chat_stream_parses_sse_deltas(monkeypatch):
 def test_lmstudio_responses_extracts_reasoning(monkeypatch):
     def fake_urlopen(request, timeout):
         assert request.full_url == "http://localhost:1234/v1/responses"
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["max_output_tokens"] == 700
         return FakeResponse(
             {
                 "output": [
@@ -208,6 +213,7 @@ def test_lmstudio_response_stream_parses_reasoning_and_text(monkeypatch):
     def fake_urlopen(request, timeout):
         body = json.loads(request.data.decode("utf-8"))
         assert body["stream"] is True
+        assert body["max_output_tokens"] == 700
         return FakeResponse(
             [
                 'data: {"type":"response.reasoning_text.delta","delta":"checking"}\n',
@@ -333,6 +339,91 @@ def test_lmstudio_stream_answer_streams_content_then_sources():
     assert "Sources:" in chunks[-1]
 
 
+def test_lmstudio_stream_answer_shows_neutral_progress_for_hidden_reasoning():
+    class ThinkingStreamingClient:
+        def is_model_loaded(self, model):
+            return True
+
+        def chat_stream(self, model, messages):
+            yield LMStudioChatResult(content="", reasoning="checking")
+            yield LMStudioChatResult(content="", reasoning=" sources")
+            yield LMStudioChatResult(content="Use")
+            yield LMStudioChatResult(content=" notes")
+
+    result = SearchResult(
+        id="chunk_1",
+        path="/docs/holiday.md",
+        file_name="holiday.md",
+        title="holiday",
+        text="Holiday planning notes",
+        snippet="Holiday planning notes",
+        score=0.9,
+        chunk_index=0,
+    )
+
+    chunks = list(LMStudioLLMProvider(ThinkingStreamingClient(), "qwen").stream_answer("Q?", [result]))
+
+    assert chunks[0] == "Generating...\n"
+    assert chunks[1] == "\nAnswer:\n"
+    assert chunks[2] == "Use"
+    assert chunks[3] == " notes"
+    assert "Sources:" in chunks[-1]
+
+
+def test_lmstudio_stream_answer_falls_back_when_model_returns_no_content():
+    class EmptyStreamingClient:
+        def is_model_loaded(self, model):
+            return True
+
+        def chat_stream(self, model, messages):
+            yield LMStudioChatResult(content="", reasoning="checking")
+
+    result = SearchResult(
+        id="chunk_1",
+        path="/docs/scanned.pdf",
+        file_name="scanned.pdf",
+        title="scanned",
+        text="Missouri public water systems laboratory notice.",
+        snippet="Missouri public water systems laboratory notice.",
+        score=0.9,
+        chunk_index=0,
+    )
+
+    chunks = list(LMStudioLLMProvider(EmptyStreamingClient(), "qwen").stream_answer("Q?", [result]))
+    output = "".join(chunks)
+
+    assert "Generating..." in output
+    assert "model did not return visible answer text" in output
+    assert "Missouri public water systems" in output
+    assert "Sources:" in output
+
+
+def test_lmstudio_answer_falls_back_when_model_returns_empty_content():
+    class EmptyClient:
+        def is_model_loaded(self, model):
+            return True
+
+        def chat(self, model, messages):
+            return LMStudioChatResult(content="")
+
+    result = SearchResult(
+        id="chunk_1",
+        path="/docs/scanned.pdf",
+        file_name="scanned.pdf",
+        title="scanned",
+        text="Missouri public water systems laboratory notice.",
+        snippet="Missouri public water systems laboratory notice.",
+        score=0.9,
+        chunk_index=0,
+    )
+
+    answer = LMStudioLLMProvider(EmptyClient(), "qwen").answer("Q?", [result])
+
+    assert "model did not return visible answer text" in answer
+    assert "Missouri public water systems" in answer
+    assert "Sources:" in answer
+
+
 def test_lmstudio_messages_include_session_history():
     provider = LMStudioLLMProvider(LMStudioClient(), "qwen")
     result = SearchResult(
@@ -358,6 +449,32 @@ def test_lmstudio_messages_include_session_history():
     assert messages[1] == {"role": "user", "content": "Tell me about the holiday plan."}
     assert messages[2] == {"role": "assistant", "content": "You have planning notes."}
     assert "What about that?" in messages[-1]["content"]
+
+
+def test_lmstudio_messages_frame_context_as_retrieved_file_evidence():
+    provider = LMStudioLLMProvider(LMStudioClient(), "qwen")
+    result = SearchResult(
+        id="chunk_1",
+        path="/docs/paper.pdf",
+        file_name="paper.pdf",
+        title="paper",
+        text="The paper discusses sycophancy in large language models.",
+        snippet="The paper discusses sycophancy in large language models.",
+        score=0.87,
+        chunk_index=2,
+    )
+
+    messages = provider._messages("What is this paper about?", [result])
+
+    system = messages[0]["content"]
+    user = messages[-1]["content"]
+    assert "OpenMind has already searched" in system
+    assert "Do not say you cannot access files" in system
+    assert "Do not introduce yourself" in system
+    assert "Retrieved local file evidence" in user
+    assert "Path: /docs/paper.pdf" in user
+    assert "Retrieval score: 0.87" in user
+    assert "Answer from the retrieved evidence" in user
 
 
 def test_context_only_answer_still_available_for_dev_fallback():

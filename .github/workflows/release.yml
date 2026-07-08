@@ -1,0 +1,144 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release. Defaults to pyproject.toml."
+        required: false
+        type: string
+      target_ref:
+        description: "Commit or ref to tag. Defaults to the current main commit. Required for backfilled older releases."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require main branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Releases must be created from main. Current ref: $GITHUB_REF"
+          exit 1
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: python -m pip install uv
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run tests
+        run: uv run pytest -q
+
+      - name: Resolve release version and target
+        id: version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_TARGET_REF: ${{ inputs.target_ref }}
+        run: |
+          project_version="$(python - <<'PY'
+          import tomllib
+
+          with open("pyproject.toml", "rb") as handle:
+              print(tomllib.load(handle)["project"]["version"])
+          PY
+          )"
+
+          release_version="${REQUESTED_VERSION:-$project_version}"
+          target_ref="${REQUESTED_TARGET_REF:-$GITHUB_SHA}"
+
+          if [ "$release_version" != "$project_version" ] && [ -z "$REQUESTED_TARGET_REF" ]; then
+            echo "Backfilled release '$release_version' must provide target_ref."
+            exit 1
+          fi
+
+          target_sha="$(git rev-parse "$target_ref^{commit}")"
+          if ! git merge-base --is-ancestor "$target_sha" "$GITHUB_SHA"; then
+            echo "target_ref '$target_ref' is not in the current main history."
+            exit 1
+          fi
+
+          echo "version=$release_version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$release_version" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          pattern = rf"^## {re.escape(version)}(?:\s+-\s+.*)?\n(?P<body>.*?)(?=^## |\Z)"
+          match = re.search(pattern, changelog, flags=re.MULTILINE | re.DOTALL)
+
+          if not match:
+              raise SystemExit(f"CHANGELOG.md does not contain a section for {version}.")
+
+          body = match.group("body").strip()
+          if not body or body == "- No unreleased changes.":
+              raise SystemExit(f"CHANGELOG.md section for {version} has no release notes.")
+
+          Path("release-notes.md").write_text(body + "\n", encoding="utf-8")
+          PY
+
+      - name: Create or verify release tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          TARGET_SHA: ${{ steps.version.outputs.target_sha }}
+        run: |
+          git fetch --tags origin
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            tagged_commit="$(git rev-list -n 1 "$TAG")"
+            if [ "$tagged_commit" != "$TARGET_SHA" ]; then
+              echo "Tag $TAG already exists but does not point at the requested release commit."
+              exit 1
+            fi
+          else
+            git tag -a "$TAG" "$TARGET_SHA" -m "OpenMind Core $VERSION"
+            git push origin "$TAG"
+          fi
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists."
+            exit 1
+          fi
+
+          gh release create "$TAG" \
+            --verify-tag \
+            --title "OpenMind Core $VERSION" \
+            --notes-file release-notes.md

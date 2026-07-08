@@ -69,7 +69,7 @@ def setup_command() -> None:
     console.print("1. LM Studio")
     provider_choice = typer.prompt("Selected", default="1")
     if provider_choice.strip() != "1":
-        raise typer.BadParameter("Only LM Studio is supported in v0.2.")
+        raise typer.BadParameter("Only LM Studio is supported right now.")
 
     base_url = typer.prompt("LM Studio base URL", default=DEFAULT_LMSTUDIO_BASE_URL)
     config = OpenMindConfig(
@@ -156,6 +156,7 @@ def index_command(ctx: typer.Context) -> None:
     records = current.discover_files()
     summary.files_seen = len(records)
     console.print(f"Discovered {len(records)} supported file(s).")
+    issues: list[tuple[str, str, str]] = []
     with Progress(console=console) as progress:
         task = progress.add_task("Checking files", total=len(records))
         for file_record in records:
@@ -166,6 +167,8 @@ def index_command(ctx: typer.Context) -> None:
             summary.files_already_indexed += file_summary.files_already_indexed
             summary.errors += file_summary.errors
             summary.chunks_created += file_summary.chunks_created
+            if file_record.status in {"skipped", "error"} and file_record.error:
+                issues.append((file_record.status, file_record.path, file_record.error))
             progress.advance(task)
     console.print("[green]Index complete[/green]")
     console.print(f"Files seen: {summary.files_seen}")
@@ -181,6 +184,11 @@ def index_command(ctx: typer.Context) -> None:
             "and are accessible in OpenMind."
             "[/green]"
         )
+    if issues:
+        console.print("[yellow]Files needing attention:[/yellow]")
+        for status, path, error in issues:
+            console.print(f"- {status}: {path}")
+            console.print(f"  {error}")
 
 
 @index_app.command("start")
@@ -305,7 +313,7 @@ def models_update(
     console.print("1. LM Studio")
     provider_choice = typer.prompt("Selected", default="1")
     if provider_choice.strip() != "1":
-        raise typer.BadParameter("Only LM Studio is supported in v0.2.")
+        raise typer.BadParameter("Only LM Studio is supported right now.")
 
     default_base_url = (
         config.provider.base_url

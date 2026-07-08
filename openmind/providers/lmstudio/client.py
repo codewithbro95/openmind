@@ -13,6 +13,8 @@ from typing import Any
 from openmind.providers.lmstudio.errors import LMStudioConnectionError, LMStudioModelError
 from openmind.providers.lmstudio.models import LMStudioModel
 
+DEFAULT_CHAT_MAX_TOKENS = 700
+
 
 @dataclass(frozen=True)
 class LMStudioChatResult:
@@ -84,6 +86,7 @@ class LMStudioClient:
                 "model": model,
                 "messages": messages,
                 "temperature": 0.2,
+                "max_tokens": DEFAULT_CHAT_MAX_TOKENS,
             },
         )
         choices = data.get("choices") or []
@@ -110,6 +113,7 @@ class LMStudioClient:
                 "model": model,
                 "messages": messages,
                 "temperature": 0.2,
+                "max_tokens": DEFAULT_CHAT_MAX_TOKENS,
                 "stream": True,
             },
         ):
@@ -135,6 +139,7 @@ class LMStudioClient:
                 "model": model,
                 "input": messages,
                 "reasoning": {"effort": effort},
+                "max_output_tokens": DEFAULT_CHAT_MAX_TOKENS,
             },
         )
         return _parse_response_result(data)
@@ -152,6 +157,7 @@ class LMStudioClient:
                 "model": model,
                 "input": messages,
                 "reasoning": {"effort": effort},
+                "max_output_tokens": DEFAULT_CHAT_MAX_TOKENS,
                 "stream": True,
             },
         ):
