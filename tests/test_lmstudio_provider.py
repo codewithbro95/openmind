@@ -8,8 +8,9 @@ from openmind.core.models import SearchResult
 from openmind.llm.answer import ContextOnlyAnswerProvider
 from openmind.providers.lmstudio.client import LMStudioChatResult, LMStudioClient
 from openmind.providers.lmstudio.errors import LMStudioConnectionError
+from openmind.providers.lmstudio.images import LMStudioImageDescriptionProvider
 from openmind.providers.lmstudio.llm import LMStudioLLMProvider
-from openmind.providers.lmstudio.models import split_models
+from openmind.providers.lmstudio.models import split_models, vision_models
 
 
 class FakeResponse:
@@ -51,6 +52,13 @@ def test_lmstudio_model_listing_and_split(monkeypatch):
                         "display_name": "Nomic Embed",
                         "loaded_instances": [{"id": "nomic", "config": {}}],
                     },
+                    {
+                        "type": "llm",
+                        "key": "smolvlm",
+                        "display_name": "SmolVLM",
+                        "capabilities": {"vision": True},
+                        "loaded_instances": [],
+                    },
                 ]
             }
         )
@@ -63,6 +71,7 @@ def test_lmstudio_model_listing_and_split(monkeypatch):
     assert chat_models[0].key == "qwen"
     assert embedding_models[0].key == "nomic"
     assert embedding_models[0].is_loaded is True
+    assert vision_models(models)[0].key == "smolvlm"
 
 
 def test_lmstudio_load_model_posts_model_key(monkeypatch):
@@ -156,6 +165,39 @@ def test_lmstudio_chat_extracts_think_block(monkeypatch):
 
     assert result.reasoning == "checking sources"
     assert result.content == "The answer is grounded."
+
+
+def test_lmstudio_image_description_provider_sends_multimodal_request(tmp_path):
+    path = tmp_path / "image.png"
+    path.write_bytes(b"fake image bytes")
+
+    class FakeClient:
+        def __init__(self):
+            self.loaded = []
+            self.messages = None
+            self.max_tokens = None
+
+        def load_model_if_needed(self, model):
+            self.loaded.append(model)
+            return {"status": "already_loaded", "skipped": True}
+
+        def chat(self, model, messages, max_tokens):
+            self.messages = messages
+            self.max_tokens = max_tokens
+            return LMStudioChatResult(content="A small test image.")
+
+    client = FakeClient()
+    provider = LMStudioImageDescriptionProvider(client=client, model="smolvlm")
+
+    description = provider.describe(path, "Describe this image.", 80)
+
+    assert description == "A small test image."
+    assert client.loaded == ["smolvlm"]
+    assert client.max_tokens == 80
+    content = client.messages[0]["content"]
+    assert content[0] == {"type": "text", "text": "Describe this image."}
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
 
 
 def test_lmstudio_chat_stream_parses_sse_deltas(monkeypatch):

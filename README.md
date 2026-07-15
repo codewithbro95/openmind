@@ -8,7 +8,7 @@ OpenMind is a local AI memory engine for your computer.
 
 It indexes folders you explicitly approve, stores searchable memory locally, and lets you search or ask questions across your own files with sources attached.
 
-OpenMind is not a chatbot, desktop UI, browser extension, cloud sync service, or agent that controls your machine. The first useful version does three things well:
+OpenMind is not a chatbot, desktop UI, browser extension, cloud sync service, or agent that controls your machine. It focuses on three core jobs:
 
 ```text
 Index local files -> Search local memory -> Ask source-grounded questions
@@ -18,15 +18,13 @@ Index local files -> Search local memory -> Ask source-grounded questions
 
 I am building this because I have a lot of files on my computer, and sometimes I genuinely get lost. I forget a file I downloaded months ago, or something I saved years ago. sometims i just need an order id from a receipt i got last week, a flight number from a pdf, or a detail buried somewhere in my messy downloads folder or even across my system. I do not want to upload all of that to another app just to find it again, no. or even give access to my data to big tech companies. I want a local AI memory that quietly understands the folders I already have existing on my system, works in the background, and helps me ask my own computer what it already has, that's it
 
-## Current Status
+## What OpenMind Does
 
-OpenMind Core is early, but usable as a developer-facing CLI.
-
-What works today:
+OpenMind Core is a local-first CLI for indexing, searching, and asking questions over user-approved folders.
 
 - Local app storage under `~/.openmind`.
 - User-approved folder sources.
-- File extraction for common text, PDF, DOCX, CSV, Markdown, and HTML files.
+- File extraction for common text, PDF, DOCX, CSV, Markdown, HTML, and image files.
 - LanceDB vector storage.
 - SQLite source, file, and indexing job records.
 - LM Studio as the user-facing local AI provider.
@@ -36,33 +34,52 @@ What works today:
 - Source-grounded answers.
 - Developer log inspection.
 
-What is intentionally not here yet:
+OpenMind intentionally avoids:
 
-- No desktop UI.
-- No browser extension.
-- No cloud sync.
-- No file automation.
-- No plugin marketplace.
-- No deleting, moving, or modifying user files.
+- desktop UI
+- browser extension
+- cloud sync
+- file automation
+- plugin marketplace
+- deleting, moving, or modifying user files
 
 See [FEATURES.md](FEATURES.md) for the complete shipped feature list and roadmap. See [CHANGELOG.md](CHANGELOG.md) for release notes.
-
-GitHub Releases are published from `main` using the version in `pyproject.toml` and the matching notes in `CHANGELOG.md`. A version change merged to `main` triggers the release workflow automatically.
 
 ## Requirements
 
 - Python 3.11+
 - `uv`
-- LM Studio for local chat and embedding models
+- LM Studio for local chat, embedding, and vision models
 - macOS, Linux, or another Python-supported environment
 
-OpenMind Core `0.0.3` uses LM Studio as its only user-facing provider. The older Sentence Transformers provider remains only as a development and test fallback.
+OpenMind Core `0.0.4` uses LM Studio as its only user-facing provider. The older Sentence Transformers provider remains only as a development and test fallback.
 
 ## Install
 
-Clone the project, enter the package directory, and install it into your Python environment.
+Install the CLI with `uv`:
 
-If you already have a conda environment named `openmind`:
+```bash
+uv tool install openmind-core
+```
+
+Start setup:
+
+```bash
+openmind setup
+```
+
+You can also install it with pipx:
+
+```bash
+pipx install openmind-core
+```
+
+The PyPI package is named `openmind-core`; the command it installs is `openmind`.
+
+## Development
+For local development, clone the project and install it into your Python environment.
+
+If you already have a conda environment named `openmind` (you can name it whatever you want):
 
 ```bash
 cd openmind-core
@@ -73,7 +90,7 @@ pytest
 
 `uv pip install` detects the activated conda environment and installs the packages into it, while still using uv's fast resolver and installer.
 
-If you want uv to manage the environment itself:
+To let `uv` manage the environment:
 
 ```bash
 cd openmind-core
@@ -97,18 +114,18 @@ Start the LM Studio local server first. In LM Studio, open the Developer tab and
 lms server start
 ```
 
-Then run first-time setup:
+Run first-time setup:
 
 ```bash
 openmind setup
 ```
 
-Setup will:
+Setup:
 
 1. Initialize `~/.openmind`.
 2. Check that LM Studio is reachable.
 3. Let you choose LM Studio as the provider.
-4. List available chat and embedding models.
+4. List available chat, embedding, and image description models.
 5. Load the selected models.
 6. Ask which folders to index.
 7. Start background indexing.
@@ -141,7 +158,7 @@ openmind ask
 
 ## CLI Reference
 
-Normal users should start with:
+Start here:
 
 ```bash
 openmind setup
@@ -257,7 +274,7 @@ POST /v1/responses
 POST /v1/embeddings
 ```
 
-OpenMind stores separate model choices because chat and embeddings are different jobs:
+OpenMind stores separate model choices because chat, embeddings, and image descriptions are different jobs:
 
 ```toml
 [provider]
@@ -272,15 +289,19 @@ embedding_model = "selected-embedding-model-key"
 [indexing]
 auto_start_after_setup = true
 background = true
+
+[extraction.images]
+enabled = true
+model = "selected-vision-model-key"
 ```
 
-To change saved models later, run:
+Change saved models with:
 
 ```bash
 openmind models update
 ```
 
-OpenMind will ask for the provider, fetch the latest LM Studio model list, let you choose a chat model and embedding model, save the new config, and load the selected models by default.
+The command fetches the latest LM Studio model list, lets you choose chat, embedding, and image description models, saves the new config, and loads the selected models by default.
 
 When loading or updating models, OpenMind checks LM Studio first and skips models that are already loaded.
 
@@ -294,7 +315,7 @@ OpenMind keeps the architecture intentionally simple. Each technology has one si
 
 OpenMind is the memory engine and CLI. It does not use LM Studio's chat interface, or any other provider's chat UI. It calls a local model server endpoint to reach downloaded models.
 
-Today that local model server is LM Studio. Later, the same provider layer can support other local or OpenAI-compatible servers.
+The current local model server is LM Studio. The provider layer is designed for additional local or OpenAI-compatible servers.
 
 ```mermaid
 flowchart TD
@@ -307,7 +328,7 @@ flowchart TD
     CLI --> Ask["Ask"]
 
     Setup --> Config["~/.openmind/config.toml"]
-    Setup --> ModelServer["Local Model Server<br/>(LM Studio today, others later)"]
+    Setup --> ModelServer["Local Model Server<br/>(LM Studio, other providers later)"]
 
     Sources --> SQLite["SQLite<br/>sources, files, jobs, status"]
 
@@ -383,7 +404,7 @@ Simple way to think about it:
 
 OpenMind uses a model provider abstraction for embeddings and answers.
 
-In `0.0.3`, the only implemented user-facing provider is LM Studio. OpenMind talks to LM Studio's local server endpoint; it does not use the LM Studio chat interface.
+In `0.0.4`, the only implemented user-facing provider is LM Studio. OpenMind talks to LM Studio's local server endpoint; it does not use the LM Studio chat interface.
 
 OpenMind uses the provider endpoint for:
 
@@ -391,12 +412,13 @@ OpenMind uses the provider endpoint for:
 - embedding search queries
 - generating source-grounded answers
 - streaming answer tokens in ask mode
+- generating image descriptions for image indexing
 
 Why LM Studio first:
 
 - it runs local models on the user's machine
 - it exposes a local API server
-- it supports OpenAI-compatible chat and embedding endpoints
+- it supports OpenAI-compatible chat, embedding, and multimodal endpoints
 - it lets OpenMind stay local-first without owning model runtime complexity
 
 Future providers can fit behind the same layer, such as Ollama, llama.cpp, or another OpenAI-compatible local endpoint.
@@ -424,7 +446,7 @@ Why uv:
 
 ## Supported Files
 
-OpenMind currently indexes:
+OpenMind indexes:
 
 ```text
 .txt
@@ -433,9 +455,16 @@ OpenMind currently indexes:
 .docx
 .csv
 .html
+.png
+.jpg
+.jpeg
+.webp
+.bmp
+.tif
+.tiff
 ```
 
-OpenMind is document-first by default. It does not index source code, JSON config files, package metadata, app asset catalogs, or other low-level project internals unless a future opt-in mode is added. High-level project documents such as `README.md`, Markdown notes, PDFs, DOCX files, CSVs, and HTML docs can still be indexed.
+OpenMind is document-first by default. It does not index source code, JSON config files, package metadata, app asset catalogs, or other low-level project internals unless a dedicated indexing mode is enabled. High-level project documents such as `README.md`, Markdown notes, PDFs, DOCX files, CSVs, and HTML docs can still be indexed.
 
 PDF extraction first uses the normal embedded text layer. If a PDF looks scanned or the extracted text is too sparse, OpenMind automatically tries local OCR with RapidOCR + ONNX Runtime and then continues the normal indexing pipeline.
 
@@ -457,7 +486,39 @@ Assets.xcassets
 hidden folders
 ```
 
-Image files are included in the sample `data/` directory for realism, but OpenMind does not index standalone image content or run screenshot OCR yet.
+## Image Indexing
+
+OpenMind can index standalone images through a local vision model served by LM Studio. The recommended first model is:
+
+```text
+ggml-org/SmolVLM-500M-Instruct-GGUF
+```
+
+Image indexing keeps the original image file on disk and does not store raw image bytes in LanceDB.
+
+For supported image files, OpenMind stores:
+
+- file path
+- searchable file and image metadata
+- generated image description
+- OCR text when available
+- text embedding of the combined description and OCR text
+
+That means users can search and ask questions about screenshots, photos, scanned image files, labels, UI errors, receipts, and other image-like local files without copying the image itself into the vector database.
+
+Image metadata includes safe, JSON-friendly fields such as dimensions, format, mode, file size, EXIF tags, and text-based image info. Binary metadata fields are summarized by size instead of being stored as raw bytes.
+
+Image config lives in `~/.openmind/config.toml`:
+
+```toml
+[extraction.images]
+enabled = true
+model = "ggml-org/SmolVLM-500M-Instruct-GGUF"
+ocr_enabled = true
+max_new_tokens = 220
+```
+
+During setup or `openmind models update`, OpenMind asks for an image description model separately from chat and embedding models. If no vision model is available, image indexing can be disabled while normal document indexing continues.
 
 ## OCR Fallback
 
@@ -506,7 +567,7 @@ Output is shaped like:
    Snippet: The packing checklist includes...
 ```
 
-If search is bad, answers will be bad. OpenMind treats search quality as the foundation.
+Answer quality depends on retrieval quality. OpenMind treats search as the foundation.
 
 ## Ask Mode
 
@@ -694,7 +755,7 @@ openmind uninstall --yes --package
 
 ## Test Data
 
-This repo includes a small `data/` folder with notes, Markdown, JSON, CSV, HTML, JavaScript, a sample PDF, and images. Only supported document-first formats are indexed by default.
+This repo includes a small `data/` folder with notes, Markdown, JSON, CSV, HTML, JavaScript, a sample PDF, and images. Supported document-first formats, PDFs, and supported image files can be indexed.
 
 Try it:
 
@@ -760,9 +821,9 @@ Near-term work:
 - Source enable and disable.
 - Hybrid keyword plus vector search.
 - Better snippets and citations.
-- OCR for screenshots and scanned PDFs.
+- Better OCR and metadata extraction for screenshots, images, and scanned PDFs.
 - Persistent chat sessions.
-- Local API for future UI clients.
+- Local API for UI clients.
 - Additional providers after LM Studio is solid.
 
 The full roadmap lives in [FEATURES.md](FEATURES.md).

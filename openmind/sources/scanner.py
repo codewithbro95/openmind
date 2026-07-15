@@ -12,6 +12,13 @@ SUPPORTED_EXTENSIONS = {
     ".docx",
     ".csv",
     ".html",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".bmp",
+    ".tif",
+    ".tiff",
 }
 
 IGNORED_DIRS = {
@@ -40,17 +47,23 @@ IGNORED_DIRS = {
 
 
 class FileScanner:
-    def scan(self, source: Source, include_content_hash: bool = True) -> list[FileRecord]:
+    def scan(
+        self,
+        source: Source,
+        include_content_hash: bool = True,
+        supported_extensions: set[str] | None = None,
+    ) -> list[FileRecord]:
         root = Path(source.path)
         if not root.exists():
             return []
+        extensions = supported_extensions or SUPPORTED_EXTENSIONS
         paths = root.rglob("*") if source.recursive else root.glob("*")
         records: list[FileRecord] = []
         for path in paths:
             if self._should_ignore(path, root) or not path.is_file():
                 continue
             extension = path.suffix.lower()
-            if extension not in SUPPORTED_EXTENSIONS:
+            if extension not in extensions:
                 continue
             stat = path.stat()
             records.append(

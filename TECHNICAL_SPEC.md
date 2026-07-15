@@ -1,4 +1,4 @@
-# OpenMind Core 0.0.3 Technical Spec
+# OpenMind Core 0.0.4 Technical Spec
 
 ## Goal
 
@@ -9,13 +9,13 @@ OpenMind Core must:
 - Index local files from explicitly added folders.
 - Extract text from supported file types.
 - Normalize and chunk extracted text.
-- Embed chunks with a local Sentence Transformers model.
+- Embed chunks with the configured local embedding provider.
 - Store vectors and chunk metadata in LanceDB.
 - Store sources, file records, and indexing state in SQLite.
 - Search indexed chunks and return file path, score, and snippet.
 - Ask questions by retrieving chunks and returning a source-grounded answer.
 - Store all app data under `~/.openmind` unless `OPENMIND_HOME` is set.
-- Use LM Studio as the first and only user-facing LLM and embedding provider.
+- Use LM Studio as the first user-facing model server for chat, embeddings, and image descriptions.
 - Provide first-run setup and background indexing progress.
 
 ## Folder Structure
@@ -37,6 +37,7 @@ openmind-core/
 │   │   ├── text.py
 │   │   ├── pdf.py
 │   │   ├── ocr.py
+│   │   ├── image.py
 │   │   ├── docx.py
 │   │   ├── code.py
 │   │   ├── tabular.py
@@ -51,6 +52,7 @@ openmind-core/
 │   │       ├── client.py
 │   │       ├── llm.py
 │   │       ├── embeddings.py
+│   │       ├── images.py
 │   │       ├── models.py
 │   │       └── errors.py
 │   ├── storage/
@@ -402,6 +404,53 @@ OCR metadata is stored on chunks:
 
 If OCR dependencies are missing or OCR fails, extraction records `ocr_error` metadata. The indexer marks an otherwise empty PDF as skipped with that error and continues indexing other files. Optional `ocrmypdf` backend support remains available for users who install OCRmyPDF, Tesseract, and Ghostscript separately.
 
+## Image Indexing
+
+Standalone image files are converted to searchable text, then processed by the normal ingestion pipeline.
+
+Image extraction flow:
+
+1. Keep the original image on disk.
+2. Read image metadata such as width, height, mode, format, file size, EXIF, and safe image info fields.
+3. Send the image plus an indexing prompt to the configured local model server endpoint.
+4. Generate a concise search-oriented image description.
+5. Run local OCR when available.
+6. Combine description, OCR text, and searchable metadata text.
+7. Normalize, chunk, embed, and store the resulting text in LanceDB.
+
+OpenMind must not store raw image bytes in LanceDB.
+
+Default config:
+
+```toml
+[extraction.images]
+enabled = true
+model = "ggml-org/SmolVLM-500M-Instruct-GGUF"
+ocr_enabled = true
+max_new_tokens = 220
+```
+
+Image chunk metadata includes:
+
+```json
+{
+  "file_type": "image",
+  "raw_image_stored": false,
+  "image_description_model": "ggml-org/SmolVLM-500M-Instruct-GGUF",
+  "image_ocr_used": true,
+  "image_width": 1200,
+  "image_height": 800,
+  "image_format": "JPEG",
+  "image_exif": {
+    "Make": "Example Camera"
+  }
+}
+```
+
+LM Studio is the current model server implementation for image descriptions. The first recommended vision model is `ggml-org/SmolVLM-500M-Instruct-GGUF`. Future providers should keep the same extractor interface and storage contract.
+
+Image metadata must be JSON serializable before storage. Binary metadata fields such as ICC profiles are summarized, not stored as raw bytes.
+
 ## LM Studio Provider
 
 `LMStudioClient`:
@@ -439,6 +488,8 @@ OpenAI-compatible API:
 - `POST /v1/responses`
 - `POST /v1/embeddings`
 
+Multimodal image descriptions also use `POST /v1/chat/completions`, with image bytes sent only to the local model server request as a data URL. Those bytes are not persisted by OpenMind.
+
 `openmind ask --show-thinking` uses the Responses endpoint with a `reasoning` payload and displays reasoning only when LM Studio returns explicit reasoning/thinking text. OpenMind also handles chat responses that expose fields such as `reasoning_content`, `thinking`, or a visible `<think>...</think>` block.
 
 `openmind models update` re-runs provider and model selection after setup:
@@ -446,11 +497,12 @@ OpenAI-compatible API:
 1. Initialize OpenMind if needed.
 2. Ask for provider selection. LM Studio is the only current provider.
 3. Fetch `GET /api/v1/models`.
-4. Split models into chat and embedding lists.
+4. Split models into chat, embedding, and vision/image-capable lists.
 5. Let the user choose a chat model, or search-only mode.
 6. Require one embedding model.
-7. Save the selected keys to `~/.openmind/config.toml`.
-8. Load the selected models unless `--no-load` is passed.
+7. Let the user choose an image description model or disable image indexing.
+8. Save the selected keys to `~/.openmind/config.toml`.
+9. Load the selected models unless `--no-load` is passed.
 
 `openmind ask` streams by default:
 
@@ -490,7 +542,7 @@ OpenMind should tell the user when unchanged files are already indexed and acces
 
 Discovery should be metadata-first. It should not compute content hashes for every discovered file before indexing starts, because that makes large folders appear stuck and wastes work for unchanged files.
 
-Default scanning is document-first. OpenMind should index human-facing files such as `.txt`, `.md`, `.pdf`, `.docx`, `.csv`, and `.html`. It should not index source code, JSON config/package files, generated build artifacts, app asset catalogs such as `Assets.xcassets`, dependency folders, or other low-level project internals unless a future opt-in code indexing mode is added.
+Default scanning is document-first plus supported images. OpenMind should index human-facing files such as `.txt`, `.md`, `.pdf`, `.docx`, `.csv`, `.html`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tif`, and `.tiff`. It should not index source code, JSON config/package files, generated build artifacts, app asset catalogs such as `Assets.xcassets`, dependency folders, or other low-level project internals unless a future opt-in code indexing mode is added.
 
 ## Search Flow
 
@@ -597,6 +649,7 @@ The first acceptable build must prove:
 - `openmind source list` shows recorded sources.
 - Scanner finds supported files and ignores noisy folders.
 - Extractors turn supported test files into text.
+- Image extractor stores generated descriptions/OCR text, not raw image bytes.
 - Chunker creates overlapping chunks with stable source metadata.
 - SQLite file records can be inserted and updated.
 - Search service can return ranked results with a fake embedding provider and fake vector store.

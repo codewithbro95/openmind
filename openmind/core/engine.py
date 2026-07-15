@@ -17,11 +17,16 @@ from openmind.extractors import ExtractorRegistry, default_registry
 from openmind.ingestion.chunker import TextChunker
 from openmind.ingestion.normalizer import normalize_text
 from openmind.llm.answer import AnswerProvider, ContextOnlyAnswerProvider
-from openmind.providers.lmstudio import LMStudioClient, LMStudioEmbeddingProvider, LMStudioLLMProvider
+from openmind.providers.lmstudio import (
+    LMStudioClient,
+    LMStudioEmbeddingProvider,
+    LMStudioImageDescriptionProvider,
+    LMStudioLLMProvider,
+)
 from openmind.providers.lmstudio.models import LMStudioModel
 from openmind.retrieval.search import SearchService
 from openmind.sources.manager import SourceManager
-from openmind.sources.scanner import FileScanner
+from openmind.sources.scanner import SUPPORTED_EXTENSIONS, FileScanner
 from openmind.storage.lance_store import LanceStore
 from openmind.storage.sqlite_store import SQLiteStore, utc_now
 
@@ -42,7 +47,7 @@ class OpenMindEngine:
         self.lance = lance_store or LanceStore(self.paths.lancedb_path)
         self.sources = SourceManager(self.sqlite)
         self.scanner = FileScanner()
-        self.extractors = extractors or default_registry(self.config.extraction.ocr)
+        self.extractors = extractors or self._build_extractor_registry()
         self.chunker = TextChunker()
         self.embeddings = embeddings or self._build_embedding_provider()
         self.answer_provider = answer_provider or self._build_answer_provider()
@@ -57,7 +62,7 @@ class OpenMindEngine:
         self.config = OpenMindConfig.load(self.paths.config_path)
         self.embeddings = self._build_embedding_provider()
         self.answer_provider = self._build_answer_provider()
-        self.extractors = default_registry(self.config.extraction.ocr)
+        self.extractors = self._build_extractor_registry()
         return self.config
 
     def save_config(self, config: OpenMindConfig) -> None:
@@ -66,6 +71,7 @@ class OpenMindEngine:
         self.config = config
         self.embeddings = self._build_embedding_provider()
         self.answer_provider = self._build_answer_provider()
+        self.extractors = self._build_extractor_registry()
 
     def add_source(self, path: str) -> Source:
         self.init()
@@ -96,7 +102,14 @@ class OpenMindEngine:
     def discover_files(self):
         records = []
         for source in self.sources.list(enabled_only=True):
-            records.extend(self.scanner.scan(source, include_content_hash=False))
+            records.extend(
+                self.scanner.scan(
+                    source,
+                    include_content_hash=False,
+                    supported_extensions=SUPPORTED_EXTENSIONS
+                    & self.extractors.supported_extensions,
+                )
+            )
         return records
 
     def create_index_job(self) -> IndexJob:
@@ -346,7 +359,27 @@ class OpenMindEngine:
             loaded.append(client.load_model_if_needed(self.config.models.chat_model))
         if self.config.models.embedding_model:
             loaded.append(client.load_model_if_needed(self.config.models.embedding_model))
+        if self.config.extraction.images.enabled and self.config.extraction.images.model:
+            loaded.append(client.load_model_if_needed(self.config.extraction.images.model))
         return loaded
+
+    def _build_extractor_registry(self) -> ExtractorRegistry:
+        return default_registry(
+            self.config.extraction,
+            image_description_provider=self._build_image_description_provider(),
+        )
+
+    def _build_image_description_provider(self):
+        if (
+            self.config.provider.name == "lmstudio"
+            and self.config.extraction.images.enabled
+            and self.config.extraction.images.model
+        ):
+            return LMStudioImageDescriptionProvider(
+                client=self.lmstudio_client(),
+                model=self.config.extraction.images.model,
+            )
+        return None
 
     def _build_embedding_provider(self) -> EmbeddingProvider:
         if self.config.provider.name == "lmstudio" and self.config.models.embedding_model:

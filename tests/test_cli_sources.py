@@ -1,6 +1,9 @@
 from typer.testing import CliRunner
 
-from openmind.cli.main import app
+import pytest
+import typer
+
+from openmind.cli.main import _resolve_source_selection, app
 from openmind.core.models import FileRecord
 from openmind.storage.sqlite_store import SQLiteStore
 
@@ -37,3 +40,24 @@ def test_source_add_reports_existing_indexed_source(monkeypatch, tmp_path):
     assert second.exit_code == 0
     assert "Source already added" in second.output
     assert "already accessible" in second.output
+
+
+def test_setup_source_selection_accepts_pasted_folder_path(tmp_path):
+    docs = tmp_path / "docs"
+    data = tmp_path / "data"
+    docs.mkdir()
+    data.mkdir()
+
+    selected = _resolve_source_selection(f"1,{data}", [docs])
+
+    assert selected == [docs, data]
+
+
+def test_setup_source_selection_rejects_unknown_text(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+
+    with pytest.raises(typer.BadParameter) as exc:
+        _resolve_source_selection("not-a-folder", [docs])
+
+    assert "Enter a listed number or an existing folder path" in str(exc.value)

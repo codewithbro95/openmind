@@ -1,5 +1,6 @@
 from openmind.core.config import (
     ExtractionSettings,
+    ImageExtractionSettings,
     IndexingSettings,
     ModelSettings,
     OCRSettings,
@@ -23,7 +24,14 @@ def test_config_save_and_load_round_trip(tmp_path):
                 enabled=True,
                 backend="ocrmypdf",
                 min_text_chars_per_page=120,
-            )
+            ),
+            images=ImageExtractionSettings(
+                enabled=True,
+                model="vision-key",
+                prompt="Describe this image.",
+                ocr_enabled=False,
+                max_new_tokens=123,
+            ),
         ),
     )
 
@@ -37,6 +45,11 @@ def test_config_save_and_load_round_trip(tmp_path):
     assert loaded.extraction.ocr.enabled is True
     assert loaded.extraction.ocr.backend == "ocrmypdf"
     assert loaded.extraction.ocr.min_text_chars_per_page == 120
+    assert loaded.extraction.images.enabled is True
+    assert loaded.extraction.images.model == "vision-key"
+    assert loaded.extraction.images.prompt == "Describe this image."
+    assert loaded.extraction.images.ocr_enabled is False
+    assert loaded.extraction.images.max_new_tokens == 123
 
 
 def test_default_config_uses_python_installed_ocr_backend():
@@ -44,3 +57,5 @@ def test_default_config_uses_python_installed_ocr_backend():
 
     assert config.extraction.ocr.enabled is True
     assert config.extraction.ocr.backend == "rapidocr"
+    assert config.extraction.images.enabled is True
+    assert config.extraction.images.model == "ggml-org/SmolVLM-500M-Instruct-GGUF"

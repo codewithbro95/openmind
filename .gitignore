@@ -2,9 +2,12 @@ __pycache__/
 *.py[cod]
 .DS_Store
 .pytest_cache/
+.uv-cache/
 .ruff_cache/
 .mypy_cache/
 .venv/
 dist/
 build/
 *.egg-info/
+.env
+data/assets/user/

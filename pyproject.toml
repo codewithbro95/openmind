@@ -4,12 +4,26 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openmind-core"
-version = "0.0.3"
+version = "0.0.4"
 description = "Local-first AI memory engine for user-approved folders."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "OpenMind contributors" }]
+keywords = ["ai", "cli", "local-first", "memory", "rag", "search", "lancedb", "lm-studio"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Database",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Utilities",
+]
 dependencies = [
   "typer>=0.12.0",
   "rich>=13.7.0",
@@ -38,8 +52,27 @@ dev = [
 [project.scripts]
 openmind = "openmind.cli.main:app"
 
+[project.urls]
+Homepage = "https://github.com/codewithbro95/openmind"
+Repository = "https://github.com/codewithbro95/openmind"
+Issues = "https://github.com/codewithbro95/openmind/issues"
+Changelog = "https://github.com/codewithbro95/openmind/blob/main/CHANGELOG.md"
+
 [tool.uv]
 package = true
+
+[tool.hatch.build]
+exclude = [
+  "/.uv-cache",
+  "/.venv",
+  "/.pytest_cache",
+  "/.ruff_cache",
+  "/.mypy_cache",
+  "/dist",
+  "/data/assets/user",
+  "*.pyc",
+  ".DS_Store",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["openmind"]

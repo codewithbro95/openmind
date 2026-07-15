@@ -21,6 +21,13 @@ class ExtractorRegistry:
     def __init__(self, extractors: list[Extractor]):
         self.extractors = extractors
 
+    @property
+    def supported_extensions(self) -> set[str]:
+        extensions: set[str] = set()
+        for extractor in self.extractors:
+            extensions.update(extractor.extensions)
+        return extensions
+
     def for_path(self, path: str) -> Extractor:
         for extractor in self.extractors:
             if extractor.supports(path):

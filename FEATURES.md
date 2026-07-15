@@ -74,10 +74,17 @@ Supported indexed formats:
 - `.docx`
 - `.csv`
 - `.html`
+- `.png`
+- `.jpg`
+- `.jpeg`
+- `.webp`
+- `.bmp`
+- `.tif`
+- `.tiff`
 
 OpenMind is document-first by default. Source code, JSON config, package metadata, app asset catalogs, and other low-level project internals are not indexed unless a future opt-in mode is added.
 
-Current image files are not indexed. Sample images exist in `data/` only for fixture realism.
+Image files are indexed by generating text descriptions through a local vision model endpoint and embedding that text like any other document chunk.
 
 ### Extraction
 
@@ -88,6 +95,10 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 - DOCX extraction with `python-docx`.
 - CSV extraction with `pandas`.
 - HTML extraction with BeautifulSoup.
+- Image description extraction through a local LM Studio vision model.
+- Optional image OCR text extraction with RapidOCR.
+- Searchable image metadata extraction for dimensions, format, EXIF, and safe image info fields.
+- Raw image bytes are not stored in LanceDB.
 
 ### Ingestion
 
@@ -103,7 +114,7 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 
 ### LM Studio Provider
 
-- LM Studio is the only user-facing `0.0.3` provider.
+- LM Studio is the only user-facing `0.0.4` provider.
 - Native LM Studio REST model listing:
   - `GET /api/v1/models`
 - Native LM Studio model loading:
@@ -114,7 +125,9 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
   - `POST /v1/responses`
 - OpenAI-compatible embeddings:
   - `POST /v1/embeddings`
-- Separate chat model and embedding model config.
+- OpenAI-compatible multimodal chat for image descriptions:
+  - `POST /v1/chat/completions`
+- Separate chat, embedding, and image description model config.
 
 ### Model Commands
 
@@ -123,7 +136,7 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 - `openmind models update`
 - `openmind provider status`
 - Interactive model re-selection from the latest LM Studio model list.
-- Saves separate chat and embedding model choices to `~/.openmind/config.toml`.
+- Saves separate chat, embedding, and image description model choices.
 - Can load newly selected models immediately or save only with `--no-load`.
 - Skips model loading when LM Studio reports the model is already loaded.
 
@@ -209,12 +222,12 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 
 - `data/` folder with local indexing fixtures.
 - Includes text, Markdown, JSON, CSV, HTML, JavaScript, PDF, PNG, and JPEG samples.
-- Only supported document-first formats and PDFs are indexed in `0.0.3`.
+- Supported document-first formats, PDFs, PNGs, and JPEGs can be indexed.
 
 ## Known Limits
 
 - Pause and stop cannot interrupt a file already inside extraction or an LM Studio embedding request.
-- Image files are not indexed.
+- Image indexing requires a local vision model served through LM Studio.
 - Default scanned-PDF OCR can be installed through `uv`; optional OCRmyPDF mode still needs local OCRmyPDF, Tesseract, and Ghostscript.
 - No persistent chat history yet.
 - No file watcher yet.
@@ -241,7 +254,7 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 - Add faster cancellation checks around embedding batches.
 - Add clearer model-loaded status.
 
-### 0.0.4 Retrieval Quality
+### 0.0.5 Retrieval Quality
 
 - Hybrid search: vector plus keyword/BM25.
 - Better snippets around matched content.
@@ -251,7 +264,7 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 - Better PDF page metadata.
 - Better CSV/table summaries.
 
-### 0.0.5 Local Memory Quality
+### 0.0.6 Local Memory Quality
 
 - Persistent conversation sessions.
 - Session list/resume/delete commands.
@@ -260,16 +273,16 @@ Current image files are not indexed. Sample images exist in `data/` only for fix
 - Answer confidence and missing-evidence notices.
 - Per-source indexing policies.
 
-### 0.0.6 File Coverage
+### 0.0.7 File Coverage
 
 - OCR for screenshots and image files.
 - Advanced OCR backend option such as PaddleOCR.
-- Image metadata indexing.
+- More advanced image metadata filtering and ranking.
 - Audio transcript ingestion.
 - Email export ingestion.
 - More document formats.
 
-### 0.0.7 Local Service
+### 0.0.8 Local Service
 
 - FastAPI local API.
 - Local web UI or desktop UI can connect to the same engine.

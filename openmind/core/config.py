@@ -10,6 +10,19 @@ from pydantic import BaseModel, Field
 
 DEFAULT_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_LMSTUDIO_BASE_URL = "http://localhost:1234"
+DEFAULT_IMAGE_DESCRIPTION_MODEL = "ggml-org/SmolVLM-500M-Instruct-GGUF"
+DEFAULT_IMAGE_DESCRIPTION_PROMPT = """Describe this image for local search indexing.
+
+Include:
+- main objects
+- people if present
+- scene/environment
+- visible text
+- UI/app/screenshot details
+- document type if it looks like a document
+- errors, warnings, or important labels if visible
+
+Keep it concise but detailed enough to make the image searchable."""
 
 
 @dataclass(frozen=True)
@@ -56,6 +69,12 @@ def default_config() -> str:
         "enabled = true\n"
         'backend = "rapidocr"\n'
         "min_text_chars_per_page = 80\n"
+        "\n[extraction.images]\n"
+        "enabled = true\n"
+        f'model = "{DEFAULT_IMAGE_DESCRIPTION_MODEL}"\n'
+        "ocr_enabled = true\n"
+        "max_new_tokens = 220\n"
+        'prompt = """' + DEFAULT_IMAGE_DESCRIPTION_PROMPT + '"""\n'
     )
 
 
@@ -81,8 +100,17 @@ class OCRSettings(BaseModel):
     min_text_chars_per_page: int = 80
 
 
+class ImageExtractionSettings(BaseModel):
+    enabled: bool = True
+    model: str = DEFAULT_IMAGE_DESCRIPTION_MODEL
+    prompt: str = DEFAULT_IMAGE_DESCRIPTION_PROMPT
+    ocr_enabled: bool = True
+    max_new_tokens: int = 220
+
+
 class ExtractionSettings(BaseModel):
     ocr: OCRSettings = Field(default_factory=OCRSettings)
+    images: ImageExtractionSettings = Field(default_factory=ImageExtractionSettings)
 
 
 class OpenMindConfig(BaseModel):
@@ -119,11 +147,21 @@ class OpenMindConfig(BaseModel):
             f"enabled = {_toml_bool(self.extraction.ocr.enabled)}\n"
             f'backend = "{_escape_toml(self.extraction.ocr.backend)}"\n'
             f"min_text_chars_per_page = {self.extraction.ocr.min_text_chars_per_page}\n"
+            "\n[extraction.images]\n"
+            f"enabled = {_toml_bool(self.extraction.images.enabled)}\n"
+            f'model = "{_escape_toml(self.extraction.images.model)}"\n'
+            f"ocr_enabled = {_toml_bool(self.extraction.images.ocr_enabled)}\n"
+            f"max_new_tokens = {self.extraction.images.max_new_tokens}\n"
+            f'prompt = """{_escape_multiline_toml(self.extraction.images.prompt)}"""\n'
         )
 
 
 def _escape_toml(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _escape_multiline_toml(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
 
 
 def _toml_bool(value: bool) -> str:

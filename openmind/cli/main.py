@@ -16,6 +16,7 @@ from rich.prompt import Prompt
 from rich.table import Table
 
 from openmind.core.config import (
+    DEFAULT_IMAGE_DESCRIPTION_MODEL,
     DEFAULT_LMSTUDIO_BASE_URL,
     IndexingSettings,
     ModelSettings,
@@ -25,7 +26,7 @@ from openmind.core.config import (
 from openmind.core.engine import OpenMindEngine
 from openmind.core.models import IndexJob, IndexSummary
 from openmind.providers.lmstudio.errors import LMStudioConnectionError, LMStudioError
-from openmind.providers.lmstudio.models import LMStudioModel, split_models
+from openmind.providers.lmstudio.models import LMStudioModel, split_models, vision_models
 
 app = typer.Typer(help="OpenMind local AI memory engine.")
 source_app = typer.Typer(help="Manage user-approved folders.")
@@ -88,12 +89,22 @@ def setup_command() -> None:
 
     console.print("[green]✓[/green] LM Studio server detected")
     chat_models, embedding_models = split_models(models)
+    image_models = vision_models(models)
 
     chat_model = _choose_model("Available chat models", chat_models, allow_empty=True)
-    embedding_model = _choose_model("Available embedding models", embedding_models, allow_empty=False)
+    embedding_model = _choose_model(
+        "Available embedding models",
+        embedding_models,
+        allow_empty=False,
+    )
+    image_model = _choose_image_model(image_models, chat_models)
 
     config.models.chat_model = chat_model.key if chat_model else ""
     config.models.embedding_model = embedding_model.key
+    config.extraction.images.enabled = image_model is not None
+    config.extraction.images.model = (
+        image_model.key if image_model else DEFAULT_IMAGE_DESCRIPTION_MODEL
+    )
     current.save_config(config)
 
     console.print("Loading selected models...")
@@ -104,6 +115,12 @@ def setup_command() -> None:
         else:
             console.print("[yellow]Search-only mode enabled because no chat model was selected.[/yellow]")
         _load_lmstudio_model(client, embedding_model.key, "Embedding model")
+        if image_model:
+            _load_lmstudio_model(client, image_model.key, "Image description model")
+        else:
+            console.print(
+                "[yellow]Image indexing disabled because no vision model was selected.[/yellow]"
+            )
     except LMStudioError as exc:
         console.print(f"[yellow]{exc}[/yellow]")
         console.print("You can retry loading models with: openmind models load")
@@ -308,6 +325,11 @@ def models_update(
     current_embedding_model = (
         config.models.embedding_model if current_provider_name == "lmstudio" else ""
     )
+    current_image_model = (
+        config.extraction.images.model
+        if current_provider_name == "lmstudio" and config.extraction.images.enabled
+        else ""
+    )
 
     console.print("Choose AI provider:")
     console.print("1. LM Studio")
@@ -336,6 +358,7 @@ def models_update(
         raise typer.Exit(1) from exc
 
     chat_models, embedding_models = split_models(models)
+    image_models = vision_models(models)
     chat_model_key = _choose_model_key(
         "Available chat models",
         chat_models,
@@ -348,9 +371,21 @@ def models_update(
         allow_empty=False,
         current_key=current_embedding_model,
     )
+    image_model_key = _choose_model_key(
+        "Available image description models",
+        image_models,
+        allow_empty=True,
+        current_key=current_image_model,
+        empty_label="Disable image indexing",
+        missing_message=(
+            "No vision model was detected in LM Studio. Image indexing will stay disabled."
+        ),
+    )
 
     config.models.chat_model = chat_model_key
     config.models.embedding_model = embedding_model_key
+    config.extraction.images.enabled = bool(image_model_key)
+    config.extraction.images.model = image_model_key or DEFAULT_IMAGE_DESCRIPTION_MODEL
     current.save_config(config)
     console.print("[green]Saved model configuration.[/green]")
 
@@ -367,6 +402,10 @@ def models_update(
         else:
             console.print("[yellow]Search-only mode enabled because no chat model was selected.[/yellow]")
         results.append(_load_lmstudio_model(client, embedding_model_key, "Embedding model"))
+        if image_model_key:
+            results.append(_load_lmstudio_model(client, image_model_key, "Image description model"))
+        else:
+            console.print("[yellow]Image indexing disabled.[/yellow]")
         _print_model_load_summary(results)
     except LMStudioError as exc:
         console.print(f"[yellow]{exc}[/yellow]")
@@ -713,15 +752,47 @@ def _choose_model(
         raise typer.BadParameter("Invalid model selection.") from exc
 
 
+def _choose_image_model(
+    image_models: list[LMStudioModel],
+    chat_models: list[LMStudioModel],
+) -> LMStudioModel | None:
+    if image_models:
+        return _choose_model("Available image description models", image_models, allow_empty=True)
+
+    console.print("[yellow]No vision model was detected in LM Studio.[/yellow]")
+    console.print(
+        "OpenMind can index images when a vision model such as "
+        f"{DEFAULT_IMAGE_DESCRIPTION_MODEL} is available through LM Studio."
+    )
+    if not chat_models:
+        console.print("Image indexing will be disabled for now.")
+        return None
+
+    use_chat_list = typer.confirm(
+        "Choose from available chat models anyway",
+        default=False,
+    )
+    if not use_chat_list:
+        console.print("Image indexing will be disabled for now.")
+        return None
+    return _choose_model("Available chat models", chat_models, allow_empty=True)
+
+
 def _choose_model_key(
     title: str,
     models: list[LMStudioModel],
     allow_empty: bool,
     current_key: str = "",
+    empty_label: str = "Search-only mode (no chat model)",
+    missing_message: str | None = None,
 ) -> str:
     if not models:
         if allow_empty:
-            console.print("[yellow]No chat model found. Search-only mode will be used.[/yellow]")
+            console.print(
+                "[yellow]"
+                f"{missing_message or 'No chat model found. Search-only mode will be used.'}"
+                "[/yellow]"
+            )
             return ""
         console.print("[red]No embedding model found in LM Studio.[/red]")
         console.print("OpenMind needs an embedding model to build local memory.")
@@ -732,7 +803,7 @@ def _choose_model_key(
     if current_key:
         console.print(f"Current: {current_key}")
     if allow_empty:
-        console.print("0. Search-only mode (no chat model)")
+        console.print(f"0. {empty_label}")
     for index, model in enumerate(models, start=1):
         loaded = " loaded" if model.is_loaded else ""
         console.print(f"{index}. {model.display_name} ({model.key}){loaded}")
@@ -874,23 +945,51 @@ def _choose_sources(current: OpenMindEngine) -> None:
     for index, path in enumerate(available, start=1):
         console.print(f"{index}. {path}")
     console.print(f"{len(available) + 1}. Add custom folder")
-    raw = typer.prompt("Selected numbers, comma separated", default="1")
-    selected_paths: list[Path] = []
-    for part in [value.strip() for value in raw.split(",") if value.strip()]:
-        try:
-            index = int(part)
-        except ValueError as exc:
-            raise typer.BadParameter(f"Invalid folder selection: {part}") from exc
-        if 1 <= index <= len(available):
-            selected_paths.append(available[index - 1])
-        elif index == len(available) + 1:
-            selected_paths.append(Path(typer.prompt("Custom folder")).expanduser())
+    raw = typer.prompt("Selected numbers or paths, comma separated", default="1")
+    selected_paths = _resolve_source_selection(raw, available)
+    custom_option = len(available) + 1
+    if any(part.strip() == str(custom_option) for part in raw.split(",")):
+        selected_paths.append(Path(typer.prompt("Custom folder")).expanduser())
+
+    seen_paths: set[Path] = set()
     for path in selected_paths:
+        normalized_path = path.expanduser().resolve()
+        if normalized_path in seen_paths:
+            console.print(f"[yellow]Already selected in this setup run:[/yellow] {normalized_path}")
+            continue
+        seen_paths.add(normalized_path)
         try:
-            source = current.add_source(str(path))
+            source = current.add_source(str(normalized_path))
             console.print(f"[green]✓[/green] {source.path}")
         except sqlite3.IntegrityError:
-            console.print(f"[green]✓[/green] {path} already added")
+            _print_existing_source_status(current, str(normalized_path))
+
+
+def _resolve_source_selection(raw: str, available: list[Path]) -> list[Path]:
+    selected_paths: list[Path] = []
+    custom_option = len(available) + 1
+    for part in [value.strip() for value in raw.split(",") if value.strip()]:
+        if part == str(custom_option):
+            continue
+        try:
+            index = int(part)
+        except ValueError:
+            path = Path(part).expanduser()
+            if not path.exists() or not path.is_dir():
+                raise typer.BadParameter(
+                    f"Invalid folder selection: {part}. "
+                    "Enter a listed number or an existing folder path."
+                )
+            selected_paths.append(path)
+            continue
+        if 1 <= index <= len(available):
+            selected_paths.append(available[index - 1])
+            continue
+        raise typer.BadParameter(
+            f"Invalid folder selection: {part}. "
+            "Enter a listed number or an existing folder path."
+        )
+    return selected_paths
 
 
 def _print_sources(sources) -> None:
