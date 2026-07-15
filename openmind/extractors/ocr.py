@@ -24,15 +24,11 @@ class RapidOCRBackend:
     def extract_pdf_text(self, path: Path, language: str = "eng", timeout: int = 600) -> str:
         try:
             import pypdfium2 as pdfium
-            from rapidocr_onnxruntime import RapidOCR
         except ImportError as exc:
             raise OCRUnavailableError(
                 "OCR fallback requires Python OCR dependencies. Run "
                 '`uv pip install -e ".[dev]"` from the OpenMind project.'
             ) from exc
-
-        if self._engine is None:
-            self._engine = RapidOCR()
 
         document = pdfium.PdfDocument(str(path))
         pages: list[str] = []
@@ -43,7 +39,7 @@ class RapidOCRBackend:
                 image = bitmap.to_pil()
                 with tempfile.NamedTemporaryFile(suffix=".png") as temp_image:
                     image.save(temp_image.name)
-                    rows, _elapsed = self._engine(temp_image.name)
+                    rows, _elapsed = self._rapidocr()(temp_image.name)
                 page.close()
                 if rows:
                     lines = [_ocr_row_text(row) for row in rows]
@@ -54,6 +50,26 @@ class RapidOCRBackend:
             document.close()
 
         return "\n".join(pages).strip()
+
+    def extract_image_text(self, path: Path) -> str:
+        rows, _elapsed = self._rapidocr()(str(path))
+        if not rows:
+            return ""
+        lines = [_ocr_row_text(row) for row in rows]
+        return "\n".join(line for line in lines if line).strip()
+
+    def _rapidocr(self):
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+        except ImportError as exc:
+            raise OCRUnavailableError(
+                "OCR requires rapidocr-onnxruntime. Reinstall OpenMind with the published "
+                "package or run `uv pip install -e .` from the project."
+            ) from exc
+
+        if self._engine is None:
+            self._engine = RapidOCR()
+        return self._engine
 
 
 class OCRmyPDFBackend:

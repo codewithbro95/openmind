@@ -1,4 +1,5 @@
 from openmind.core.config import OCRSettings
+from openmind.extractors.image import ImageExtractor
 from openmind.extractors.pdf import PDFExtractor, _needs_ocr
 from openmind.extractors.text import MarkdownExtractor, TextExtractor
 from openmind.ingestion.normalizer import normalize_text
@@ -26,6 +27,21 @@ class FakeOCRBackend:
     def extract_pdf_text(self, path):
         self.paths.append(path)
         return "OCR extracted invoice text with order ID 12345."
+
+    def extract_image_text(self, path):
+        self.paths.append(path)
+        return "Visible label: cabin map."
+
+
+class FakeImageDescriptionProvider:
+    model_name = "fake-vision"
+
+    def __init__(self):
+        self.calls = []
+
+    def describe(self, path, prompt, max_new_tokens):
+        self.calls.append((path, prompt, max_new_tokens))
+        return "A cabin trip checklist screenshot with a map and packing notes."
 
 
 def test_text_extractor_returns_plain_text(tmp_path):
@@ -90,3 +106,51 @@ def test_needs_ocr_for_sparse_pdf_text():
     assert _needs_ocr("", page_count=3, settings=settings) is True
     assert _needs_ocr("short text", page_count=3, settings=settings) is True
     assert _needs_ocr("normal text " * 100, page_count=3, settings=settings) is False
+
+
+def test_image_extractor_describes_image_without_storing_raw_bytes(tmp_path):
+    from PIL import Image
+
+    path = tmp_path / "screenshot.png"
+    Image.new("RGB", (16, 8), color="white").save(path)
+    provider = FakeImageDescriptionProvider()
+    ocr_backend = FakeOCRBackend()
+
+    document = ImageExtractor(
+        description_provider=provider,
+        ocr_backend=ocr_backend,
+    ).extract(str(path))
+
+    assert "Image description:" in document.text
+    assert "cabin trip checklist" in document.text
+    assert "Visible text OCR:" in document.text
+    assert "Visible label" in document.text
+    assert document.metadata["raw_image_stored"] is False
+    assert document.metadata["file_type"] == "image"
+    assert document.metadata["image_width"] == 16
+    assert document.metadata["image_height"] == 8
+    assert document.metadata["image_ocr_used"] is True
+    assert provider.calls[0][0] == path
+
+
+def test_image_extractor_indexes_safe_image_metadata(tmp_path):
+    from PIL import Image
+    from PIL.PngImagePlugin import PngInfo
+
+    path = tmp_path / "screenshot.png"
+    png_info = PngInfo()
+    png_info.add_text("Software", "OpenMind Test Rig")
+    png_info.add_text("Description", "Quarterly dashboard screenshot")
+    Image.new("RGB", (20, 10), color="white").save(path, pnginfo=png_info)
+
+    document = ImageExtractor(
+        description_provider=FakeImageDescriptionProvider(),
+        ocr_backend=FakeOCRBackend(),
+    ).extract(str(path))
+
+    assert document.metadata["image_format"] == "PNG"
+    assert document.metadata["image_info"]["Software"] == "OpenMind Test Rig"
+    assert document.metadata["image_info"]["Description"] == "Quarterly dashboard screenshot"
+    assert "Image metadata:" in document.text
+    assert "image_info.Software: OpenMind Test Rig" in document.text
+    assert "image_info.Description: Quarterly dashboard screenshot" in document.text

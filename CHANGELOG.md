@@ -4,7 +4,15 @@ User-facing changes for each OpenMind Core release.
 
 ## Unreleased
 
-- No unreleased changes.
+No unreleased changes.
+
+## 0.0.4 - 2026-07-15
+
+- Added image indexing through a local LM Studio vision model.
+- Added generated image descriptions and optional image OCR text to local memory.
+- Added searchable image metadata such as dimensions, format, EXIF, and safe image info fields.
+- Kept raw image bytes out of LanceDB; OpenMind stores paths, metadata, text descriptions, OCR text, and embeddings.
+- Improved setup folder selection so pasted paths work and duplicate sources are reported clearly.
 
 ## 0.0.3 - 2026-07-08
 

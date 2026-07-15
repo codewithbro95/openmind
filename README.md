@@ -24,7 +24,7 @@ OpenMind Core is a local-first CLI for indexing, searching, and asking questions
 
 - Local app storage under `~/.openmind`.
 - User-approved folder sources.
-- File extraction for common text, PDF, DOCX, CSV, Markdown, and HTML files.
+- File extraction for common text, PDF, DOCX, CSV, Markdown, HTML, and image files.
 - LanceDB vector storage.
 - SQLite source, file, and indexing job records.
 - LM Studio as the user-facing local AI provider.
@@ -49,10 +49,10 @@ See [FEATURES.md](FEATURES.md) for the complete shipped feature list and roadmap
 
 - Python 3.11+
 - `uv`
-- LM Studio for local chat and embedding models
+- LM Studio for local chat, embedding, and vision models
 - macOS, Linux, or another Python-supported environment
 
-OpenMind Core `0.0.3` uses LM Studio as its only user-facing provider. The older Sentence Transformers provider remains only as a development and test fallback.
+OpenMind Core `0.0.4` uses LM Studio as its only user-facing provider. The older Sentence Transformers provider remains only as a development and test fallback.
 
 ## Install
 
@@ -125,7 +125,7 @@ Setup:
 1. Initialize `~/.openmind`.
 2. Check that LM Studio is reachable.
 3. Let you choose LM Studio as the provider.
-4. List available chat and embedding models.
+4. List available chat, embedding, and image description models.
 5. Load the selected models.
 6. Ask which folders to index.
 7. Start background indexing.
@@ -274,7 +274,7 @@ POST /v1/responses
 POST /v1/embeddings
 ```
 
-OpenMind stores separate model choices because chat and embeddings are different jobs:
+OpenMind stores separate model choices because chat, embeddings, and image descriptions are different jobs:
 
 ```toml
 [provider]
@@ -289,6 +289,10 @@ embedding_model = "selected-embedding-model-key"
 [indexing]
 auto_start_after_setup = true
 background = true
+
+[extraction.images]
+enabled = true
+model = "selected-vision-model-key"
 ```
 
 Change saved models with:
@@ -297,7 +301,7 @@ Change saved models with:
 openmind models update
 ```
 
-The command fetches the latest LM Studio model list, lets you choose a chat model and embedding model, saves the new config, and loads the selected models by default.
+The command fetches the latest LM Studio model list, lets you choose chat, embedding, and image description models, saves the new config, and loads the selected models by default.
 
 When loading or updating models, OpenMind checks LM Studio first and skips models that are already loaded.
 
@@ -400,7 +404,7 @@ Simple way to think about it:
 
 OpenMind uses a model provider abstraction for embeddings and answers.
 
-In `0.0.3`, the only implemented user-facing provider is LM Studio. OpenMind talks to LM Studio's local server endpoint; it does not use the LM Studio chat interface.
+In `0.0.4`, the only implemented user-facing provider is LM Studio. OpenMind talks to LM Studio's local server endpoint; it does not use the LM Studio chat interface.
 
 OpenMind uses the provider endpoint for:
 
@@ -408,12 +412,13 @@ OpenMind uses the provider endpoint for:
 - embedding search queries
 - generating source-grounded answers
 - streaming answer tokens in ask mode
+- generating image descriptions for image indexing
 
 Why LM Studio first:
 
 - it runs local models on the user's machine
 - it exposes a local API server
-- it supports OpenAI-compatible chat and embedding endpoints
+- it supports OpenAI-compatible chat, embedding, and multimodal endpoints
 - it lets OpenMind stay local-first without owning model runtime complexity
 
 Future providers can fit behind the same layer, such as Ollama, llama.cpp, or another OpenAI-compatible local endpoint.
@@ -450,6 +455,13 @@ OpenMind indexes:
 .docx
 .csv
 .html
+.png
+.jpg
+.jpeg
+.webp
+.bmp
+.tif
+.tiff
 ```
 
 OpenMind is document-first by default. It does not index source code, JSON config files, package metadata, app asset catalogs, or other low-level project internals unless a dedicated indexing mode is enabled. High-level project documents such as `README.md`, Markdown notes, PDFs, DOCX files, CSVs, and HTML docs can still be indexed.
@@ -474,7 +486,39 @@ Assets.xcassets
 hidden folders
 ```
 
-Image files are included in the sample `data/` directory for realism, but OpenMind does not index standalone image content or run screenshot OCR yet.
+## Image Indexing
+
+OpenMind can index standalone images through a local vision model served by LM Studio. The recommended first model is:
+
+```text
+ggml-org/SmolVLM-500M-Instruct-GGUF
+```
+
+Image indexing keeps the original image file on disk and does not store raw image bytes in LanceDB.
+
+For supported image files, OpenMind stores:
+
+- file path
+- searchable file and image metadata
+- generated image description
+- OCR text when available
+- text embedding of the combined description and OCR text
+
+That means users can search and ask questions about screenshots, photos, scanned image files, labels, UI errors, receipts, and other image-like local files without copying the image itself into the vector database.
+
+Image metadata includes safe, JSON-friendly fields such as dimensions, format, mode, file size, EXIF tags, and text-based image info. Binary metadata fields are summarized by size instead of being stored as raw bytes.
+
+Image config lives in `~/.openmind/config.toml`:
+
+```toml
+[extraction.images]
+enabled = true
+model = "ggml-org/SmolVLM-500M-Instruct-GGUF"
+ocr_enabled = true
+max_new_tokens = 220
+```
+
+During setup or `openmind models update`, OpenMind asks for an image description model separately from chat and embedding models. If no vision model is available, image indexing can be disabled while normal document indexing continues.
 
 ## OCR Fallback
 
@@ -711,7 +755,7 @@ openmind uninstall --yes --package
 
 ## Test Data
 
-This repo includes a small `data/` folder with notes, Markdown, JSON, CSV, HTML, JavaScript, a sample PDF, and images. Only supported document-first formats are indexed by default.
+This repo includes a small `data/` folder with notes, Markdown, JSON, CSV, HTML, JavaScript, a sample PDF, and images. Supported document-first formats, PDFs, and supported image files can be indexed.
 
 Try it:
 
@@ -777,7 +821,7 @@ Near-term work:
 - Source enable and disable.
 - Hybrid keyword plus vector search.
 - Better snippets and citations.
-- OCR for screenshots and scanned PDFs.
+- Better OCR and metadata extraction for screenshots, images, and scanned PDFs.
 - Persistent chat sessions.
 - Local API for UI clients.
 - Additional providers after LM Studio is solid.

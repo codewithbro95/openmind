@@ -66,6 +66,57 @@ def test_models_update_saves_selected_lmstudio_models(monkeypatch, tmp_path):
     assert config.models.chat_model == "gemma"
     assert config.models.embedding_model == "nomic"
     assert loaded_models == ["gemma", "nomic"]
+    assert config.extraction.images.enabled is False
+
+
+def test_models_update_saves_selected_image_description_model(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENMIND_HOME", str(tmp_path))
+    loaded_models = []
+
+    def fake_urlopen(request, timeout):
+        if request.full_url.endswith("/api/v1/models"):
+            return FakeResponse(
+                {
+                    "models": [
+                        {
+                            "type": "llm",
+                            "key": "qwen",
+                            "display_name": "Qwen",
+                            "loaded_instances": [],
+                        },
+                        {
+                            "type": "llm",
+                            "key": "smolvlm",
+                            "display_name": "SmolVLM",
+                            "capabilities": {"vision": True},
+                            "loaded_instances": [],
+                        },
+                        {
+                            "type": "embedding",
+                            "key": "nomic",
+                            "display_name": "Nomic Embed",
+                            "loaded_instances": [],
+                        },
+                    ]
+                }
+            )
+        if request.full_url.endswith("/api/v1/models/load"):
+            body = json.loads(request.data.decode("utf-8"))
+            loaded_models.append(body["model"])
+            return FakeResponse({"status": "loaded"})
+        raise AssertionError(f"Unexpected URL: {request.full_url}")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = CliRunner().invoke(app, ["models", "update"], input="1\n\n1\n1\n1\n")
+
+    assert result.exit_code == 0
+    config = OpenMindConfig.load(tmp_path / "config.toml")
+    assert config.models.chat_model == "qwen"
+    assert config.models.embedding_model == "nomic"
+    assert config.extraction.images.enabled is True
+    assert config.extraction.images.model == "smolvlm"
+    assert loaded_models == ["qwen", "nomic", "smolvlm"]
 
 
 def test_models_update_can_keep_existing_models_without_loading(monkeypatch, tmp_path):

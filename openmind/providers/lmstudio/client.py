@@ -78,7 +78,12 @@ class LMStudioClient:
                 return model.is_loaded
         raise LMStudioModelError(f"Selected model is not available in LM Studio: {model_key}")
 
-    def chat(self, model: str, messages: list[dict[str, str]]) -> LMStudioChatResult:
+    def chat(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        max_tokens: int = DEFAULT_CHAT_MAX_TOKENS,
+    ) -> LMStudioChatResult:
         data = self._request(
             "POST",
             "/v1/chat/completions",
@@ -86,7 +91,7 @@ class LMStudioClient:
                 "model": model,
                 "messages": messages,
                 "temperature": 0.2,
-                "max_tokens": DEFAULT_CHAT_MAX_TOKENS,
+                "max_tokens": max_tokens,
             },
         )
         choices = data.get("choices") or []
