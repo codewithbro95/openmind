@@ -812,6 +812,25 @@ Or with uv:
 uv run pytest
 ```
 
+
+## Models and usage
+
+OpenMind does not bundle model weights or silently download large models. Models are downloaded and managed in the model provider (e.g LM Studio) while OpenMind connects to the model provider's local server and loads the models selected during `openmind setup`.
+
+As of now OpenMind uses three separate models:
+
+| Model role | What to download in LM Studio | What OpenMind uses it for | Required? |
+| --- | --- | --- | --- |
+| Chat model | An instruction/chat LLM that fits your hardware, such as a Qwen, Gemma, or Llama instruct model | Answers questions using retrieved file context, provides interactive chat responses, and can expose reasoning when supported | Optional; without it, OpenMind remains usable in search-only mode |
+| Embedding model | A dedicated embedding model, such as Nomic Embed Text (e.g `text-embedding-nomic-embed-text-v1.5`) | Converts document chunks, image descriptions, OCR text, and search queries into vectors for LanceDB retrieval | Required for indexing and search |
+| Image description model | [`ggml-org/SmolVLM-500M-Instruct-GGUF`](https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF) | Generates concise, searchable descriptions of local images before their text is embedded | Optional; required only when image indexing is enabled |
+
+The chat and embedding choices are not hard-coded because the right model depends on the user's available memory, hardware, languages, and quality requirements. Setup lists compatible models already available in the model provider and saves each choice separately.
+
+For the complete experience, download one model for each role before running setup. For text-only search, only an embedding model is required. OCR is separate from these models: OpenMind installs RapidOCR locally for scanned PDFs and visible text in images.
+
+All inference requests are sent to the configured local model server endpoint. OpenMind DOES NOT use the provider's chat interface. The chat model receives the question, retrieved text context, and current interactive-session history; the embedding model receives text; and the image description model receives an image plus the indexing prompt. Raw image bytes are used for that local request but are not stored in LanceDB.
+
 Keep docs in sync when behavior changes:
 
 - Update [FEATURES.md](FEATURES.md) when a feature lands.
