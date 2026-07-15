@@ -181,7 +181,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists."
@@ -190,7 +189,7 @@ jobs:
 
           gh release create "$TAG" \
             --verify-tag \
-            --title "OpenMind Core $VERSION" \
+            --title "$TAG" \
             --notes-file release-notes.md
 
   pypi:
