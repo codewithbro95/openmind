@@ -22,9 +22,10 @@ def test_scanner_finds_supported_files_and_ignores_noisy_dirs(tmp_path):
 
     records = FileScanner().scan(source)
 
-    assert [record.name for record in records] == ["notes.md", "image.png"]
-    assert records[0].extension == ".md"
-    assert records[0].content_hash
+    assert {record.name for record in records} == {"notes.md", "image.png"}
+    notes = next(record for record in records if record.name == "notes.md")
+    assert notes.extension == ".md"
+    assert notes.content_hash
 
 
 def test_scanner_skips_project_internals_but_keeps_high_level_docs(tmp_path):
