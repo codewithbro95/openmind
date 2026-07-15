@@ -1,5 +1,13 @@
 <p align="center">
-  <img src="assets/openmind-banner.png" alt="OpenMind banner" width="100%">
+  <img src="https://raw.githubusercontent.com/codewithbro95/openmind/refs/heads/main/assets/openmind-banner.png" alt="OpenMind banner" width="100%">
+</p>
+
+<p align="center">
+  <a href="https://github.com/codewithbro95/openmind/actions/workflows/tests.yml"><img src="https://github.com/codewithbro95/openmind/actions/workflows/tests.yml/badge.svg?branch=main" alt="Tests"></a>
+  <a href="https://github.com/codewithbro95/openmind/actions/workflows/release.yml"><img src="https://github.com/codewithbro95/openmind/actions/workflows/release.yml/badge.svg?branch=main" alt="Release"></a>
+  <a href="https://pypi.org/project/openmind-core/"><img src="https://img.shields.io/pypi/v/openmind-core.svg" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/openmind-core/"><img src="https://img.shields.io/pypi/pyversions/openmind-core.svg" alt="Supported Python versions"></a>
+  <a href="https://github.com/codewithbro95/openmind/blob/main/LICENSE"><img src="https://img.shields.io/github/license/codewithbro95/openmind" alt="MIT License"></a>
 </p>
 
 # OpenMind Core
