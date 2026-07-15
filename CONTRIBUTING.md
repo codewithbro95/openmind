@@ -177,6 +177,7 @@ The workflow:
 - Runs the test suite.
 - Creates a `vX.Y.Z` git tag.
 - Publishes the GitHub Release using the matching changelog notes.
+- Publishes the matching package to PyPI when the tag points at the current `main` release commit.
 
 The workflow can also be run manually from the GitHub Actions tab. For the current version, leave the inputs empty. For backfilling an older release, pass:
 
@@ -184,3 +185,39 @@ The workflow can also be run manually from the GitHub Actions tab. For the curre
 - `target_ref`: the commit that should be tagged for that release.
 
 Backfilled releases still require the target commit to be part of the current `main` history.
+
+## PyPI Publishing
+
+OpenMind publishes to PyPI as `openmind-core`. The installed command is still `openmind`.
+
+PyPI publishing is handled by the `Release` workflow after the GitHub Release is created. It uses PyPI Trusted Publishing, so the repository should not store a long-lived PyPI API token.
+
+The separate `Publish Python Package` workflow exists as a manual fallback for an existing release tag.
+
+One-time PyPI setup:
+
+- Create or log in to a PyPI account.
+- Create a pending trusted publisher for project `openmind-core`.
+- Set owner to `codewithbro95`.
+- Set repository to `openmind`.
+- Set workflow filename to `release.yml`.
+- Set environment name to `pypi`.
+
+Normal publish flow:
+
+- Merge the release commit to `main`.
+- Let the `Release` workflow create the GitHub Release and publish the package to PyPI.
+
+Backfilled GitHub releases are skipped for PyPI unless the release tag points at the current release commit and matches the version in `pyproject.toml`.
+
+After publishing, users can install OpenMind with:
+
+```bash
+uv tool install openmind-core
+```
+
+or:
+
+```bash
+pipx install openmind-core
+```
