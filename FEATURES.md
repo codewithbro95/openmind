@@ -25,6 +25,7 @@ Current boundaries:
 
 ### Core CLI
 
+- `openmind --version` and `openmind -V`
 - `openmind init`
 - `openmind setup`
 - `openmind status`
@@ -34,6 +35,7 @@ Current boundaries:
 - `openmind source add <path>`
 - `openmind source list`
 - `openmind source remove <id>`
+- Descriptive top-level help text for every command.
 
 ### Local Storage
 

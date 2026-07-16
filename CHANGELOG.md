@@ -4,7 +4,7 @@ User-facing changes for each OpenMind Core release.
 
 ## Unreleased
 
-No unreleased changes.
+- Added `openmind --version` and clearer command descriptions.
 
 ## 0.0.4 - 2026-07-15
 

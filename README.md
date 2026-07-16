@@ -175,6 +175,7 @@ openmind setup
 Lower-level initialization:
 
 ```bash
+openmind --version
 openmind init
 openmind status
 openmind flush

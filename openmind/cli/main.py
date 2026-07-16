@@ -15,6 +15,7 @@ from rich.progress import Progress
 from rich.prompt import Prompt
 from rich.table import Table
 
+from openmind import __version__
 from openmind.core.config import (
     DEFAULT_IMAGE_DESCRIPTION_MODEL,
     DEFAULT_LMSTUDIO_BASE_URL,
@@ -42,11 +43,31 @@ app.add_typer(dev_app, name="dev")
 console = Console()
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f"openmind {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the installed OpenMind version and exit.",
+    ),
+) -> None:
+    pass
+
+
 def engine() -> OpenMindEngine:
     return OpenMindEngine()
 
 
-@app.command("init")
+@app.command("init", help="Initialize OpenMind's local app data.")
 def init_command() -> None:
     paths = engine().init()
     console.print("[green]OpenMind initialized[/green]")
@@ -55,7 +76,7 @@ def init_command() -> None:
     console.print(f"LanceDB: {paths.lancedb_path}")
 
 
-@app.command("setup")
+@app.command("setup", help="Configure models, sources, and background indexing.")
 def setup_command() -> None:
     current = engine()
     paths = current.init()
@@ -447,7 +468,7 @@ def dev_logs(
     _tail_log_files(log_files, lines=lines, follow=follow)
 
 
-@app.command("search")
+@app.command("search", help="Search indexed local memory.")
 def search_command(query: str, limit: int = typer.Option(5, min=1, max=50)) -> None:
     try:
         results = engine().search(query, limit=limit)
@@ -464,7 +485,7 @@ def search_command(query: str, limit: int = typer.Option(5, min=1, max=50)) -> N
         console.print(f"   Snippet: {result.snippet}")
 
 
-@app.command("ask")
+@app.command("ask", help="Ask grounded questions or start an interactive session.")
 def ask_command(
     question: str | None = typer.Argument(None),
     limit: int = typer.Option(5, min=1, max=20),
@@ -496,7 +517,7 @@ def ask_command(
         raise typer.Exit(1) from exc
 
 
-@app.command("status")
+@app.command("status", help="Show OpenMind storage and indexing information.")
 def status_command() -> None:
     status = engine().status()
     table = Table(title="OpenMind Status")
@@ -510,7 +531,7 @@ def status_command() -> None:
     console.print(table)
 
 
-@app.command("flush")
+@app.command("flush", help="Clear indexed memory without deleting user files.")
 def flush_command(
     yes: bool = typer.Option(
         False,
@@ -608,7 +629,7 @@ def flush_command(
     console.print("Run `openmind index start` to build memory again.")
 
 
-@app.command("uninstall")
+@app.command("uninstall", help="Remove OpenMind local data and optionally the package.")
 def uninstall_command(
     yes: bool = typer.Option(
         False,
