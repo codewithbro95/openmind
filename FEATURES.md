@@ -123,7 +123,7 @@ Image files are indexed by generating text descriptions through a local vision m
 
 ### LM Studio Provider
 
-- LM Studio is the only user-facing `0.0.5` provider.
+- LM Studio is the only user-facing `0.0.6` provider.
 - Native LM Studio REST model listing:
   - `GET /api/v1/models`
 - Native LM Studio model loading:

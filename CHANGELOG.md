@@ -4,6 +4,10 @@ User-facing changes for each OpenMind Core release.
 
 ## Unreleased
 
+- No unreleased changes.
+
+## 0.0.6 - 2026-07-19
+
 - Removing a source now removes its indexed memory without deleting the original files.
 - The running API now picks up chat, embedding, image, and provider changes made from the CLI.
 - Updating models now unloads previous OpenMind models(from the model provider) before loading their replacements.

@@ -1,4 +1,4 @@
-# OpenMind Core 0.0.5 Technical Spec
+# OpenMind Core 0.0.6 Technical Spec
 
 ## Goal
 
@@ -688,7 +688,7 @@ openmind dev logs --lm-studio
 
 ## Local API
 
-`openmind serve` starts a single-process FastAPI application at `127.0.0.1:8765`. The CLI does not expose a host option; remote network binding is outside the `0.0.5` security model.
+`openmind serve` starts a single-process FastAPI application at `127.0.0.1:8765`. The CLI does not expose a host option; remote network binding is outside the `0.0.6` security model.
 
 The public liveness route is:
 
