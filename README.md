@@ -356,17 +356,12 @@ The current local model server is LM Studio. The provider layer is designed for 
 ```mermaid
 flowchart TD
     User["User"] --> CLI["OpenMind CLI"]
-    Clients["Local Client Apps"] --> API["Authenticated Local API<br/>127.0.0.1 / api/v1"]
 
     CLI --> Setup["Setup / Config"]
     CLI --> Sources["Source Manager"]
     CLI --> Indexing["Indexing Engine"]
     CLI --> Search["Search"]
     CLI --> Ask["Ask"]
-    API --> Sources
-    API --> Indexing
-    API --> Search
-    API --> Ask
 
     Setup --> Config["~/.openmind/config.toml"]
     Setup --> ModelServer["Local Model Server<br/>(LM Studio, other providers later)"]
@@ -396,6 +391,28 @@ flowchart TD
     Jobs --> SQLite
     CLI --> Logs["Dev Logs"]
     Logs --> LogFiles["~/.openmind/logs"]
+```
+
+### Local Client Apps
+
+Client apps connect to OpenMind through the local API. They use OpenMind's capabilities without needing to know how extraction, storage, embeddings, or model providers work internally.
+
+```mermaid
+flowchart LR
+    Clients["Local Client Apps<br/>desktop, web, mobile, extensions"]
+    API["Authenticated Local API<br/>127.0.0.1:8765/api/v1"]
+    Capabilities["OpenMind Capabilities<br/>models, sources, indexing, search, Ask, documents"]
+    Engine["OpenMind Engine"]
+    State["SQLite<br/>state + metadata"]
+    Memory["LanceDB<br/>searchable memory"]
+    ModelServer["Local Model Server<br/>(LM Studio, other providers later)"]
+
+    Clients -->|"Bearer token"| API
+    API --> Capabilities
+    Capabilities --> Engine
+    Engine --> State
+    Engine --> Memory
+    Engine --> ModelServer
 ```
 
 ### SQLite
