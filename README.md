@@ -86,6 +86,7 @@ pipx install openmind-core
 The PyPI package is named `openmind-core`; the command it installs is `openmind`.
 
 ## Development
+
 For local development, clone the project and install it into your Python environment.
 
 If you already have a conda environment named `openmind` (you can name it whatever you want):
@@ -231,7 +232,7 @@ Ask:
 ```bash
 openmind ask "What do my files say about the cabin trip?"
 openmind ask "What do my files say about the cabin trip?" --no-stream
-openmind ask "What do my files say about the cabin trip?" --show-thinking
+openmind ask "What do my files say about the cabin trip?" --reasoning
 openmind ask "What do my files say about the cabin trip?" --limit 8
 openmind ask
 ```
@@ -243,6 +244,8 @@ Interactive ask commands:
 /exit   leave the chat
 /quit   leave the chat
 ```
+
+Ask responses use Markdown, and the CLI renders streamed Markdown directly in the terminal. Interactive chat uses the model provider's stateful conversation support, so follow-ups continue from a provider response ID instead of resending the full model conversation. OpenMind keeps only a short local session history to improve retrieval for follow-up questions. Sources appear after CLI answers; API clients receive them separately from generated text. This does not change `openmind search` output.
 
 LM Studio provider commands:
 
@@ -297,18 +300,19 @@ OpenMind talks to LM Studio at:
 http://localhost:1234
 ```
 
-It uses LM Studio's native REST API for model setup:
+It uses LM Studio's native REST API for model setup and stateful Ask sessions:
 
 ```text
 GET  /api/v1/models
 POST /api/v1/models/load
+POST /api/v1/models/unload
+POST /api/v1/chat
 ```
 
-It uses OpenAI-compatible endpoints for inference:
+It uses OpenAI-compatible endpoints for embeddings and multimodal image descriptions:
 
 ```text
 POST /v1/chat/completions
-POST /v1/responses
 POST /v1/embeddings
 ```
 
@@ -665,13 +669,13 @@ Disable streaming when needed:
 openmind ask "What do my files say about the cabin trip?" --no-stream
 ```
 
-Show provider-returned thinking or reasoning when the selected LM Studio model exposes it:
+Enable and display reasoning when the selected model supports it:
 
 ```bash
-openmind ask "What do my files say about the cabin trip?" --show-thinking
+openmind ask "What do my files say about the cabin trip?" --reasoning
 ```
 
-If the model does not return explicit thinking or reasoning, OpenMind says so and still returns the answer with sources.
+Reasoning is disabled by default. If the selected model does not support reasoning, OpenMind returns a clear error when `--reasoning` is requested.
 
 Bare `openmind ask` starts a chat-like session:
 
@@ -875,7 +879,6 @@ Or with uv:
 ```bash
 uv run pytest
 ```
-
 
 ## Models and usage
 

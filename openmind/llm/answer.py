@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 
 from openmind.core.models import SearchResult
-from openmind.retrieval.context import build_context, format_sources
+from openmind.llm.session import ChatSession
 
 
 class AnswerProvider(ABC):
@@ -13,8 +13,9 @@ class AnswerProvider(ABC):
         self,
         question: str,
         context: list[SearchResult],
-        show_thinking: bool = False,
+        reasoning: bool = False,
         history: list[dict[str, str]] | None = None,
+        session: ChatSession | None = None,
     ) -> str:
         raise NotImplementedError
 
@@ -22,14 +23,16 @@ class AnswerProvider(ABC):
         self,
         question: str,
         context: list[SearchResult],
-        show_thinking: bool = False,
+        reasoning: bool = False,
         history: list[dict[str, str]] | None = None,
+        session: ChatSession | None = None,
     ) -> Iterator[str]:
         yield self.answer(
             question,
             context,
-            show_thinking=show_thinking,
+            reasoning=reasoning,
             history=history,
+            session=session,
         )
 
 
@@ -38,25 +41,20 @@ class ContextOnlyAnswerProvider(AnswerProvider):
         self,
         question: str,
         context: list[SearchResult],
-        show_thinking: bool = False,
+        reasoning: bool = False,
         history: list[dict[str, str]] | None = None,
+        session: ChatSession | None = None,
     ) -> str:
         if not context:
             return "I did not find any indexed documents that match this question."
 
-        sources = format_sources(context)
         lines = [
             "No LLM provider is configured, so I am returning the strongest retrieved context.",
             "",
-            f"Question: {question}",
+            f"**Question:** {question}",
             "",
-            "Top matches:",
+            "## Retrieved context",
         ]
         for index, result in enumerate(context, start=1):
-            lines.append(f"{index}. {result.path}")
-            lines.append(f"   Score: {result.score:.2f}")
-            lines.append(f"   Snippet: {result.snippet}")
-        lines.extend(["", "Sources:"])
-        lines.extend(f"- {source}" for source in sources)
-        lines.extend(["", "Retrieved context:", build_context(context, max_chars=6000)])
+            lines.append(f"{index}. {result.snippet}")
         return "\n".join(lines).strip()

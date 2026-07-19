@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 QueryText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
 ModelKey = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
+ChatSessionId = Annotated[str, StringConstraints(pattern=r"^chat_[0-9a-f]{16}$")]
 
 
 class ApiSchema(BaseModel):
@@ -168,11 +169,23 @@ class AskRequest(ApiSchema):
     question: QueryText
     limit: int = Field(default=5, ge=1, le=20)
     include_sources: bool = True
+    reasoning: bool = Field(
+        default=False,
+        description="Enable the selected model's reasoning capability and return its output.",
+    )
+    session_id: ChatSessionId | None = None
 
 
 class AskResponse(ApiSchema):
+    format: Literal["markdown"] = "markdown"
+    session_id: str
     answer: str
     sources: list[SearchResultResponse]
+
+
+class ChatSessionResponse(ApiSchema):
+    session_id: str
+    ended: bool = False
 
 
 class DocumentChunkResponse(ApiSchema):

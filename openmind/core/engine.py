@@ -29,6 +29,7 @@ from openmind.extractors import ExtractorRegistry, default_registry
 from openmind.ingestion.chunker import TextChunker
 from openmind.ingestion.normalizer import normalize_text
 from openmind.llm.answer import AnswerProvider, ContextOnlyAnswerProvider
+from openmind.llm.session import ChatSession
 from openmind.providers.lmstudio import (
     LMStudioClient,
     LMStudioEmbeddingProvider,
@@ -55,6 +56,8 @@ class OpenMindEngine:
     ):
         self.paths = paths or AppPaths.from_env()
         self._config_lock = threading.RLock()
+        self._chat_sessions_lock = threading.RLock()
+        self._chat_sessions: dict[str, ChatSession] = {}
         self.config, self._config_fingerprint = self._read_config_snapshot()
         self.sqlite = sqlite_store or SQLiteStore(self.paths.sqlite_path)
         self.lance = lance_store or LanceStore(self.paths.lancedb_path)
@@ -392,14 +395,16 @@ class OpenMindEngine:
         self,
         question: str,
         limit: int = 5,
-        show_thinking: bool = False,
+        reasoning: bool = False,
         history: list[dict[str, str]] | None = None,
+        session: ChatSession | None = None,
     ) -> str:
         answer, _ = self.ask_with_sources(
             question,
             limit=limit,
-            show_thinking=show_thinking,
+            reasoning=reasoning,
             history=history,
+            session=session,
         )
         return answer
 
@@ -407,17 +412,47 @@ class OpenMindEngine:
         self,
         question: str,
         limit: int = 5,
-        show_thinking: bool = False,
+        reasoning: bool = False,
         history: list[dict[str, str]] | None = None,
+        session: ChatSession | None = None,
+    ) -> tuple[str, list[SearchResult]]:
+        if session is not None:
+            with session.lock:
+                return self._answer_with_sources(
+                    question,
+                    limit=limit,
+                    reasoning=reasoning,
+                    history=session.history,
+                    session=session,
+                )
+        return self._answer_with_sources(
+            question,
+            limit=limit,
+            reasoning=reasoning,
+            history=history,
+            session=None,
+        )
+
+    def _answer_with_sources(
+        self,
+        question: str,
+        *,
+        limit: int,
+        reasoning: bool,
+        history: list[dict[str, str]] | None,
+        session: ChatSession | None,
     ) -> tuple[str, list[SearchResult]]:
         self._log("ask.start", "Answering question", question=question, limit=limit)
         results = self.search(self._conversation_search_query(question, history), limit=limit)
         answer = self.answer_provider.answer(
             question,
             results,
-            show_thinking=show_thinking,
+            reasoning=reasoning,
             history=history,
+            session=session,
         )
+        if session is not None:
+            session.record_turn(question, _visible_answer_for_history(answer))
         self._log("ask.finish", "Answer finished", question=question, sources=len(results))
         return answer, results
 
@@ -425,14 +460,16 @@ class OpenMindEngine:
         self,
         question: str,
         limit: int = 5,
-        show_thinking: bool = False,
+        reasoning: bool = False,
         history: list[dict[str, str]] | None = None,
+        session: ChatSession | None = None,
     ) -> Iterator[str]:
         stream, _ = self.ask_stream_with_sources(
             question,
             limit=limit,
-            show_thinking=show_thinking,
+            reasoning=reasoning,
             history=history,
+            session=session,
         )
         yield from stream
 
@@ -440,30 +477,88 @@ class OpenMindEngine:
         self,
         question: str,
         limit: int = 5,
-        show_thinking: bool = False,
+        reasoning: bool = False,
         history: list[dict[str, str]] | None = None,
+        session: ChatSession | None = None,
     ) -> tuple[Iterator[str], list[SearchResult]]:
+        if session is not None:
+            session.lock.acquire()
+            history = session.history
         self._log("ask.start", "Streaming answer", question=question, limit=limit)
-        results = self.search(self._conversation_search_query(question, history), limit=limit)
+        try:
+            results = self.search(self._conversation_search_query(question, history), limit=limit)
+        except Exception:
+            if session is not None:
+                session.lock.release()
+            raise
 
         def stream() -> Iterator[str]:
-            if results:
-                yield _retrieval_preamble(results)
-            for chunk in self.answer_provider.stream_answer(
-                question,
-                results,
-                show_thinking=show_thinking,
-                history=history,
-            ):
-                yield chunk
-            self._log(
-                "ask.finish",
-                "Streaming answer finished",
-                question=question,
-                sources=len(results),
-            )
+            chunks: list[str] = []
+            try:
+                for chunk in self.answer_provider.stream_answer(
+                    question,
+                    results,
+                    reasoning=reasoning,
+                    history=history,
+                    session=session,
+                ):
+                    chunks.append(chunk)
+                    yield chunk
+                if session is not None:
+                    session.record_turn(
+                        question,
+                        _visible_answer_for_history("".join(chunks).strip()),
+                    )
+                self._log(
+                    "ask.finish",
+                    "Streaming answer finished",
+                    question=question,
+                    sources=len(results),
+                )
+            finally:
+                if session is not None:
+                    session.lock.release()
 
         return stream(), results
+
+    def create_chat_session(self) -> ChatSession:
+        with self._chat_sessions_lock:
+            self._prune_chat_sessions()
+            if len(self._chat_sessions) >= 256:
+                oldest = min(
+                    self._chat_sessions.values(),
+                    key=lambda existing: existing.updated_at,
+                )
+                oldest.reset()
+                self._chat_sessions.pop(oldest.id, None)
+            session = ChatSession()
+            self._chat_sessions[session.id] = session
+            return session
+
+    def chat_session(self, session_id: str) -> ChatSession | None:
+        with self._chat_sessions_lock:
+            self._prune_chat_sessions()
+            return self._chat_sessions.get(session_id)
+
+    def end_chat_session(self, session_id: str) -> bool:
+        with self._chat_sessions_lock:
+            session = self._chat_sessions.pop(session_id, None)
+            if session is None:
+                return False
+            session.reset()
+            return True
+
+    def _prune_chat_sessions(self, max_age_seconds: float = 4 * 60 * 60) -> None:
+        cutoff = time.monotonic() - max_age_seconds
+        expired = [
+            session_id
+            for session_id, session in self._chat_sessions.items()
+            if session.updated_at < cutoff
+        ]
+        for session_id in expired:
+            session = self._chat_sessions.pop(session_id, None)
+            if session is not None:
+                session.reset()
 
     def status(self) -> StatusSummary:
         self.init()
@@ -652,7 +747,10 @@ class OpenMindEngine:
         if not history:
             return question
         recent = history[-6:]
-        parts = [f"{item.get('role', 'message')}: {item.get('content', '')}" for item in recent]
+        parts = [
+            f"{item.get('role', 'message')}: {item.get('content', '')[-700:]}"
+            for item in recent
+        ]
         parts.append(f"user: {question}")
         return "\n".join(parts)
 
@@ -672,21 +770,7 @@ def _same_file_metadata(existing, candidate) -> bool:
     )
 
 
-def _retrieval_preamble(results: list[SearchResult]) -> str:
-    sources: list[str] = []
-    seen: set[str] = set()
-    for result in results:
-        if result.path in seen:
-            continue
-        seen.add(result.path)
-        sources.append(result.path)
-        if len(sources) == 3:
-            break
-    lines = [f"Found {len(results)} relevant chunk(s) in local memory."]
-    if sources:
-        lines.append("Top source(s):")
-        lines.extend(f"- {source}" for source in sources)
-    lines.append("")
-    lines.append("Generating answer:")
-    lines.append("")
-    return "\n".join(lines)
+def _visible_answer_for_history(answer: str) -> str:
+    if answer.startswith("## Thinking") and "## Answer" in answer:
+        return answer.split("## Answer", 1)[1].strip()
+    return answer

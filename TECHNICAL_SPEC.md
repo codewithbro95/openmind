@@ -512,6 +512,8 @@ Native REST API:
 
 - `GET /api/v1/models`
 - `POST /api/v1/models/load`
+- `POST /api/v1/models/unload`
+- `POST /api/v1/chat`
 
 User-facing model loading must call `GET /api/v1/models` first and skip `POST /api/v1/models/load` when the selected model already has loaded instances.
 
@@ -523,7 +525,7 @@ OpenAI-compatible API:
 
 Multimodal image descriptions also use `POST /v1/chat/completions`, with image bytes sent only to the local model server request as a data URL. Those bytes are not persisted by OpenMind.
 
-`openmind ask --show-thinking` uses the Responses endpoint with a `reasoning` payload and displays reasoning only when LM Studio returns explicit reasoning/thinking text. OpenMind also handles chat responses that expose fields such as `reasoning_content`, `thinking`, or a visible `<think>...</think>` block.
+Ask consumes message and reasoning events from the native chat endpoint. Reasoning is disabled by default and enabled only when `--reasoning` or API `reasoning = true` is explicitly requested. OpenMind maps the boolean to a reasoning setting supported by the selected model.
 
 `openmind models update` re-runs provider and model selection after setup:
 
@@ -543,8 +545,9 @@ Only models from OpenMind's previous configuration are eligible for automatic un
 
 `openmind ask` streams by default:
 
-- normal ask uses OpenAI-compatible `POST /v1/chat/completions` with `stream = true`
-- `--show-thinking` uses OpenAI-compatible `POST /v1/responses` with `stream = true`
+- normal Ask uses native `POST /api/v1/chat` with `stream = true`
+- interactive follow-ups use the previous native `response_id`
+- `--reasoning/--no-reasoning` controls model reasoning and displays native reasoning events when enabled
 - `--no-stream` uses the previous full-response behavior
 - sources are appended after streaming finishes
 
@@ -594,8 +597,14 @@ Search requires an embedding provider. Normal setup uses LM Studio embeddings.
 1. Run the search flow for the question.
 2. Build a compact context from retrieved chunks.
 3. If an LM Studio chat model is configured, generate an answer grounded only in context.
-4. If no answer provider is configured, return the top retrieved context and sources.
-5. Always show sources.
+4. If no answer provider is configured, return retrieved snippets without embedding source paths in the answer.
+5. Return the answer as GitHub-flavored Markdown.
+6. Keep generated answer text separate from structured retrieval sources.
+7. Append deduplicated `file://` source links only in the CLI presentation layer.
+
+Interactive CLI and API chat use LM Studio's native stateful `POST /api/v1/chat` endpoint. The first turn stores the provider conversation and captures its `response_id`; follow-ups send only the current question, current retrieved evidence, and `previous_response_id`. OpenMind retains a bounded local history only to improve retrieval queries. One-shot CLI Ask remains stateless.
+
+The synchronous API identifies Ask output with `format = "markdown"`, returns an opaque OpenMind `session_id`, and accepts that ID on follow-ups. The streaming API emits the session ID and Markdown format in its initial `meta` event. `reasoning` defaults to false and controls whether model reasoning is generated and returned. Sources remain available only through the structured `sources` field or SSE event, not appended to generated API text. Search output is unchanged.
 
 ## Background Indexing
 
@@ -703,7 +712,8 @@ Protected capabilities:
 - source listing, addition, and removal
 - background indexing start, pause, resume, status, and stop
 - search with structured source records
-- synchronous and server-sent-event Ask, including structured source events
+- stateful synchronous and server-sent-event Ask, including structured source events
+- opt-in model reasoning for API clients
 - indexed file and chunk details
 - opening an indexed file in its default operating-system application
 

@@ -6,8 +6,13 @@ import pytest
 
 from openmind.core.models import SearchResult
 from openmind.llm.answer import ContextOnlyAnswerProvider
-from openmind.providers.lmstudio.client import LMStudioChatResult, LMStudioClient
-from openmind.providers.lmstudio.errors import LMStudioConnectionError
+from openmind.llm.session import ChatSession
+from openmind.providers.lmstudio.client import (
+    LMStudioChatResult,
+    LMStudioClient,
+    LMStudioStreamDelta,
+)
+from openmind.providers.lmstudio.errors import LMStudioConnectionError, LMStudioModelError
 from openmind.providers.lmstudio.images import LMStudioImageDescriptionProvider
 from openmind.providers.lmstudio.llm import LMStudioLLMProvider
 from openmind.providers.lmstudio.models import split_models, vision_models
@@ -117,6 +122,150 @@ def test_lmstudio_load_model_if_needed_skips_loaded_model(monkeypatch):
     assert response["status"] == "already_loaded"
     assert response["skipped"] is True
     assert requested_urls == ["http://localhost:1234/api/v1/models"]
+
+
+def test_lmstudio_native_chat_uses_previous_response_id(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse(
+            {
+                "output": [
+                    {"type": "reasoning", "content": "checked"},
+                    {"type": "message", "content": "Use the notes."},
+                ],
+                "response_id": "resp_next",
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = LMStudioClient().native_chat(
+        "qwen",
+        "Question and evidence",
+        "System prompt",
+        previous_response_id="resp_previous",
+        store=True,
+    )
+
+    assert captured["url"] == "http://localhost:1234/api/v1/chat"
+    assert captured["body"]["previous_response_id"] == "resp_previous"
+    assert captured["body"]["store"] is True
+    assert result.content == "Use the notes."
+    assert result.reasoning == "checked"
+    assert result.response_id == "resp_next"
+
+
+def test_lmstudio_native_chat_stream_parses_content_reasoning_and_response_id(monkeypatch):
+    def fake_urlopen(request, timeout):
+        return FakeResponse(
+            [
+                'event: reasoning.delta\n',
+                'data: {"type":"reasoning.delta","content":"checked"}\n',
+                "\n",
+                'event: message.delta\n',
+                'data: {"type":"message.delta","content":"Use notes"}\n',
+                "\n",
+                'event: chat.end\n',
+                'data: {"type":"chat.end","result":{"response_id":"resp_next"}}\n',
+                "\n",
+            ]
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    deltas = list(
+        LMStudioClient().native_chat_stream(
+            "qwen",
+            "Question and evidence",
+            "System prompt",
+            store=True,
+        )
+    )
+
+    assert deltas == [
+        LMStudioStreamDelta(reasoning="checked"),
+        LMStudioStreamDelta(content="Use notes"),
+        LMStudioStreamDelta(response_id="resp_next"),
+    ]
+
+
+def test_lmstudio_native_chat_maps_reasoning_boolean_to_model_setting(monkeypatch):
+    requests = []
+
+    def fake_urlopen(request, timeout):
+        requests.append((request.full_url, json.loads(request.data.decode("utf-8")) if request.data else None))
+        if request.full_url.endswith("/api/v1/models"):
+            return FakeResponse(
+                {
+                    "models": [
+                        {
+                            "type": "llm",
+                            "key": "reasoner",
+                            "display_name": "Reasoner",
+                            "capabilities": {
+                                "reasoning": {
+                                    "allowed_options": ["off", "low", "medium", "high"],
+                                    "default": "high",
+                                }
+                            },
+                        }
+                    ]
+                }
+            )
+        return FakeResponse({"output": [{"type": "message", "content": "Done."}]})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    client = LMStudioClient()
+
+    client.native_chat("reasoner", "Question", None, reasoning=True)
+    client.native_chat("reasoner", "Question", None, reasoning=False)
+
+    chat_payloads = [body for url, body in requests if url.endswith("/api/v1/chat")]
+    assert chat_payloads[0]["reasoning"] == "high"
+    assert chat_payloads[1]["reasoning"] == "off"
+
+
+def test_lmstudio_rejects_enabled_reasoning_for_non_reasoning_model(monkeypatch):
+    def fake_urlopen(request, timeout):
+        assert request.full_url.endswith("/api/v1/models")
+        return FakeResponse(
+            {
+                "models": [
+                    {"type": "llm", "key": "standard", "display_name": "Standard"}
+                ]
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    with pytest.raises(LMStudioModelError, match="does not support reasoning"):
+        LMStudioClient().native_chat("standard", "Question", None, reasoning=True)
+
+
+def test_lmstudio_omits_reasoning_for_non_reasoning_model_when_disabled(monkeypatch):
+    requests = []
+
+    def fake_urlopen(request, timeout):
+        requests.append((request.full_url, json.loads(request.data.decode("utf-8")) if request.data else None))
+        if request.full_url.endswith("/api/v1/models"):
+            return FakeResponse(
+                {
+                    "models": [
+                        {"type": "llm", "key": "standard", "display_name": "Standard"}
+                    ]
+                }
+            )
+        return FakeResponse({"output": [{"type": "message", "content": "Done."}]})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    LMStudioClient().native_chat("standard", "Question", None, reasoning=False)
+
+    chat_payload = next(body for url, body in requests if url.endswith("/api/v1/chat"))
+    assert "reasoning" not in chat_payload
 
 
 def test_lmstudio_unloads_every_loaded_instance_for_selected_models(monkeypatch):
@@ -354,10 +503,7 @@ def test_lmstudio_response_stream_parses_reasoning_and_text(monkeypatch):
 
 def test_lmstudio_answer_returns_unreachable_message():
     class BrokenClient:
-        def is_model_loaded(self, model):
-            return True
-
-        def chat(self, model, messages):
+        def native_chat(self, *args, **kwargs):
             raise LMStudioConnectionError("LM Studio is not reachable at http://localhost:1234.")
 
     result = SearchResult(
@@ -376,10 +522,10 @@ def test_lmstudio_answer_returns_unreachable_message():
     assert "LM Studio is not reachable" in answer
 
 
-def test_lmstudio_answer_reports_unloaded_chat_model():
+def test_lmstudio_answer_reports_native_api_model_error():
     class UnloadedClient:
-        def is_model_loaded(self, model):
-            return False
+        def native_chat(self, *args, **kwargs):
+            raise LMStudioModelError("Selected model is not available: qwen")
 
     result = SearchResult(
         id="chunk_1",
@@ -394,15 +540,13 @@ def test_lmstudio_answer_reports_unloaded_chat_model():
 
     answer = LMStudioLLMProvider(UnloadedClient(), "qwen").answer("What did I write?", [result])
 
-    assert "selected chat model is not loaded" in answer
+    assert "Selected model is not available" in answer
 
 
-def test_lmstudio_answer_can_show_provider_returned_thinking():
+def test_lmstudio_answer_can_enable_and_show_provider_reasoning():
     class ThinkingClient:
-        def is_model_loaded(self, model):
-            return True
-
-        def respond_with_reasoning(self, model, messages):
+        def native_chat(self, *args, **kwargs):
+            assert kwargs["reasoning"] is True
             return LMStudioChatResult(content="Use the planning notes.", reasoning="I checked context.")
 
     result = SearchResult(
@@ -419,22 +563,21 @@ def test_lmstudio_answer_can_show_provider_returned_thinking():
     answer = LMStudioLLMProvider(ThinkingClient(), "qwen").answer(
         "What did I write?",
         [result],
-        show_thinking=True,
+        reasoning=True,
     )
 
-    assert "Thinking:" in answer
+    assert "## Thinking" in answer
     assert "I checked context." in answer
     assert "Use the planning notes." in answer
 
 
-def test_lmstudio_stream_answer_streams_content_then_sources():
+def test_lmstudio_stream_answer_streams_only_answer_content():
     class StreamingClient:
-        def is_model_loaded(self, model):
-            return True
-
-        def chat_stream(self, model, messages):
-            yield LMStudioChatResult(content="Use")
-            yield LMStudioChatResult(content=" notes")
+        def native_chat_stream(self, *args, **kwargs):
+            assert kwargs["previous_response_id"] is None
+            assert kwargs["store"] is False
+            yield LMStudioStreamDelta(content="Use")
+            yield LMStudioStreamDelta(content=" notes")
 
     result = SearchResult(
         id="chunk_1",
@@ -451,19 +594,17 @@ def test_lmstudio_stream_answer_streams_content_then_sources():
 
     assert chunks[0] == "Use"
     assert chunks[1] == " notes"
-    assert "Sources:" in chunks[-1]
+    assert "Sources" not in "".join(chunks)
 
 
-def test_lmstudio_stream_answer_shows_neutral_progress_for_hidden_reasoning():
+def test_lmstudio_stream_answer_disables_reasoning_by_default():
     class ThinkingStreamingClient:
-        def is_model_loaded(self, model):
-            return True
-
-        def chat_stream(self, model, messages):
-            yield LMStudioChatResult(content="", reasoning="checking")
-            yield LMStudioChatResult(content="", reasoning=" sources")
-            yield LMStudioChatResult(content="Use")
-            yield LMStudioChatResult(content=" notes")
+        def native_chat_stream(self, *args, **kwargs):
+            assert kwargs["reasoning"] is False
+            yield LMStudioStreamDelta(reasoning="checking")
+            yield LMStudioStreamDelta(reasoning=" sources")
+            yield LMStudioStreamDelta(content="Use")
+            yield LMStudioStreamDelta(content=" notes")
 
     result = SearchResult(
         id="chunk_1",
@@ -478,20 +619,42 @@ def test_lmstudio_stream_answer_shows_neutral_progress_for_hidden_reasoning():
 
     chunks = list(LMStudioLLMProvider(ThinkingStreamingClient(), "qwen").stream_answer("Q?", [result]))
 
-    assert chunks[0] == "Generating...\n"
-    assert chunks[1] == "\nAnswer:\n"
-    assert chunks[2] == "Use"
-    assert chunks[3] == " notes"
-    assert "Sources:" in chunks[-1]
+    assert chunks == ["Use", " notes"]
+
+
+def test_lmstudio_stream_answer_enables_reasoning_when_requested():
+    class ThinkingStreamingClient:
+        def native_chat_stream(self, *args, **kwargs):
+            yield LMStudioStreamDelta(reasoning="checking")
+            yield LMStudioStreamDelta(content="Use notes")
+
+    result = SearchResult(
+        id="chunk_1",
+        path="/docs/holiday.md",
+        file_name="holiday.md",
+        title="holiday",
+        text="Holiday planning notes",
+        snippet="Holiday planning notes",
+        score=0.9,
+        chunk_index=0,
+    )
+
+    output = "".join(
+        LMStudioLLMProvider(ThinkingStreamingClient(), "qwen").stream_answer(
+            "Q?", [result], reasoning=True
+        )
+    )
+
+    assert "## Thinking" in output
+    assert "checking" in output
+    assert "## Answer" in output
+    assert "Use notes" in output
 
 
 def test_lmstudio_stream_answer_falls_back_when_model_returns_no_content():
     class EmptyStreamingClient:
-        def is_model_loaded(self, model):
-            return True
-
-        def chat_stream(self, model, messages):
-            yield LMStudioChatResult(content="", reasoning="checking")
+        def native_chat_stream(self, *args, **kwargs):
+            yield LMStudioStreamDelta(reasoning="checking")
 
     result = SearchResult(
         id="chunk_1",
@@ -507,18 +670,15 @@ def test_lmstudio_stream_answer_falls_back_when_model_returns_no_content():
     chunks = list(LMStudioLLMProvider(EmptyStreamingClient(), "qwen").stream_answer("Q?", [result]))
     output = "".join(chunks)
 
-    assert "Generating..." in output
     assert "model did not return visible answer text" in output
     assert "Missouri public water systems" in output
-    assert "Sources:" in output
+    assert "checking" not in output
+    assert "Sources" not in output
 
 
 def test_lmstudio_answer_falls_back_when_model_returns_empty_content():
     class EmptyClient:
-        def is_model_loaded(self, model):
-            return True
-
-        def chat(self, model, messages):
+        def native_chat(self, *args, **kwargs):
             return LMStudioChatResult(content="")
 
     result = SearchResult(
@@ -536,11 +696,23 @@ def test_lmstudio_answer_falls_back_when_model_returns_empty_content():
 
     assert "model did not return visible answer text" in answer
     assert "Missouri public water systems" in answer
-    assert "Sources:" in answer
+    assert "Sources" not in answer
 
 
-def test_lmstudio_messages_include_session_history():
-    provider = LMStudioLLMProvider(LMStudioClient(), "qwen")
+def test_lmstudio_provider_continues_stateful_session_with_response_id():
+    calls = []
+
+    class StatefulClient:
+        def native_chat(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            response_number = len(calls)
+            return LMStudioChatResult(
+                content=f"Answer {response_number}",
+                response_id=f"resp_{response_number}",
+            )
+
+    provider = LMStudioLLMProvider(StatefulClient(), "qwen")
+    session = ChatSession()
     result = SearchResult(
         id="chunk_1",
         path="/docs/holiday.md",
@@ -552,21 +724,20 @@ def test_lmstudio_messages_include_session_history():
         chunk_index=0,
     )
 
-    messages = provider._messages(
-        "What about that?",
-        [result],
-        history=[
-            {"role": "user", "content": "Tell me about the holiday plan."},
-            {"role": "assistant", "content": "You have planning notes."},
-        ],
-    )
+    provider.answer("Tell me about it", [result], session=session)
+    provider.answer("What about that?", [result], session=session)
 
-    assert messages[1] == {"role": "user", "content": "Tell me about the holiday plan."}
-    assert messages[2] == {"role": "assistant", "content": "You have planning notes."}
-    assert "What about that?" in messages[-1]["content"]
+    assert calls[0][0][2] == provider._system_prompt()
+    assert calls[0][1]["previous_response_id"] is None
+    assert calls[0][1]["store"] is True
+    assert calls[1][0][2] is None
+    assert calls[1][1]["previous_response_id"] == "resp_1"
+    assert "Tell me about it" not in calls[1][0][1]
+    assert "Answer 1" not in calls[1][0][1]
+    assert session.provider_state["response_id"] == "resp_2"
 
 
-def test_lmstudio_messages_frame_context_as_retrieved_file_evidence():
+def test_lmstudio_native_prompt_frames_context_without_requesting_sources():
     provider = LMStudioLLMProvider(LMStudioClient(), "qwen")
     result = SearchResult(
         id="chunk_1",
@@ -579,17 +750,16 @@ def test_lmstudio_messages_frame_context_as_retrieved_file_evidence():
         chunk_index=2,
     )
 
-    messages = provider._messages("What is this paper about?", [result])
+    system = provider._system_prompt()
+    user = provider._input("What is this paper about?", [result])
 
-    system = messages[0]["content"]
-    user = messages[-1]["content"]
-    assert "OpenMind has already searched" in system
-    assert "Do not say you cannot access files" in system
-    assert "Do not introduce yourself" in system
-    assert "Retrieved local file evidence" in user
+    assert "GitHub-flavored Markdown" in system
+    assert "Do not include a Sources section" in system
+    assert "OpenMind returns sources separately" in system
+    assert "Retrieved local file evidence for this turn" in user
     assert "Path: /docs/paper.pdf" in user
     assert "Retrieval score: 0.87" in user
-    assert "Answer from the retrieved evidence" in user
+    assert "Do not add sources or citations" in user
 
 
 def test_context_only_answer_still_available_for_dev_fallback():

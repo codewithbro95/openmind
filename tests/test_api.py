@@ -23,6 +23,7 @@ from openmind.core.models import (
     SourceRemovalResult,
     StatusSummary,
 )
+from openmind.llm.session import ChatSession
 from openmind.providers.lmstudio.models import LMStudioModel
 
 TOKEN = "test-token-abcdefghijklmnopqrstuvwxyz-123456"
@@ -96,6 +97,8 @@ class FakeEngine:
         self.lance = FakeLanceStore()
         self.job = None
         self.loaded = []
+        self.chat_sessions = {}
+        self.ask_calls = []
 
     def init(self):
         self.paths.ensure()
@@ -218,14 +221,28 @@ class FakeEngine:
             )
         ][:limit]
 
-    def ask_with_sources(self, question, limit=5):
-        return "Bring a jacket.", self.search(question, limit=limit)
+    def create_chat_session(self):
+        session = ChatSession()
+        self.chat_sessions[session.id] = session
+        return session
+
+    def chat_session(self, session_id):
+        return self.chat_sessions.get(session_id)
+
+    def end_chat_session(self, session_id):
+        return self.chat_sessions.pop(session_id, None) is not None
+
+    def ask_with_sources(self, question, limit=5, reasoning=False, session=None):
+        self.ask_calls.append((question, reasoning, session.id if session else None))
+        answer = "## Thinking\nChecked context.\n\n## Answer\nBring a jacket." if reasoning else "Bring a jacket."
+        return answer, self.search(question, limit=limit)
 
     def ask_stream(self, question, limit=5):
         yield "Bring "
         yield "a jacket."
 
-    def ask_stream_with_sources(self, question, limit=5):
+    def ask_stream_with_sources(self, question, limit=5, reasoning=False, session=None):
+        self.ask_calls.append((question, reasoning, session.id if session else None))
         return self.ask_stream(question, limit=limit), self.search(question, limit=limit)
 
 
@@ -429,14 +446,72 @@ def test_search_ask_stream_document_and_safe_open(tmp_path):
     assert search.json()["results"][0]["file_id"] == FILE_ID
     assert search.json()["results"][0]["source_type"] == "md"
     assert ask.json()["answer"] == "Bring a jacket."
+    assert ask.json()["format"] == "markdown"
+    assert ask.json()["session_id"].startswith("chat_")
     assert ask.json()["sources"][0]["path"] == engine.record.path
+    assert "event: meta" in stream.text
+    assert '"format": "markdown"' in stream.text
     assert "event: delta" in stream.text
     assert "event: sources" in stream.text
     assert FILE_ID in stream.text
     assert "event: done" in stream.text
+    assert '"text": "## Sources' not in stream.text
     assert document.json()["chunks"][0]["text"] == "Cabin packing notes"
     assert opened_response.status_code == 200
     assert opened == [Path(engine.record.path).resolve()]
+
+
+def test_api_chat_session_continues_and_reasoning_is_opt_in(tmp_path):
+    engine = FakeEngine(tmp_path)
+    app = create_app(engine=engine, api_token=TOKEN)
+
+    with TestClient(app) as client:
+        first = client.post(
+            f"{API}/ask",
+            headers=auth_headers(),
+            json={"question": "What should I pack?"},
+        )
+        session_id = first.json()["session_id"]
+        follow_up = client.post(
+            f"{API}/ask",
+            headers=auth_headers(),
+            json={
+                "question": "What about rain?",
+                "session_id": session_id,
+                "reasoning": True,
+            },
+        )
+        ended = client.delete(
+            f"{API}/chat/sessions/{session_id}",
+            headers=auth_headers(),
+        )
+        expired_follow_up = client.post(
+            f"{API}/ask",
+            headers=auth_headers(),
+            json={"question": "Still there?", "session_id": session_id},
+        )
+
+    assert "Thinking" not in first.json()["answer"]
+    assert follow_up.json()["session_id"] == session_id
+    assert "## Thinking" in follow_up.json()["answer"]
+    assert engine.ask_calls == [
+        ("What should I pack?", False, session_id),
+        ("What about rain?", True, session_id),
+    ]
+    assert ended.json() == {"session_id": session_id, "ended": True}
+    assert expired_follow_up.status_code == 404
+
+
+def test_api_rejects_removed_show_thinking_field(tmp_path):
+    app = create_app(engine=FakeEngine(tmp_path), api_token=TOKEN)
+    with TestClient(app) as client:
+        response = client.post(
+            f"{API}/ask",
+            headers=auth_headers(),
+            json={"question": "What should I pack?", "show_thinking": True},
+        )
+
+    assert response.status_code == 422
 
 
 def test_open_action_rejects_file_outside_enabled_sources(tmp_path):

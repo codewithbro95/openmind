@@ -94,6 +94,7 @@ curl http://127.0.0.1:8765/api/v1/search \
 | `POST` | `/api/v1/search` | Search indexed local memory |
 | `POST` | `/api/v1/ask` | Return an answer with structured sources |
 | `POST` | `/api/v1/ask/stream` | Stream answer text as server-sent events |
+| `DELETE` | `/api/v1/chat/sessions/{session_id}` | End an in-memory chat session |
 | `GET` | `/api/v1/documents/{file_id}` | Inspect an indexed file and its text chunks |
 | `POST` | `/api/v1/actions/open` | Open a validated indexed file in its default OS app |
 
@@ -160,21 +161,30 @@ Ask request:
 {
   "question": "Do I have screenshots related to login errors?",
   "limit": 8,
-  "include_sources": true
+  "include_sources": true,
+  "reasoning": false,
+  "session_id": null
 }
 ```
 
-The synchronous response contains `answer` and structured `sources`. Use `/api/v1/ask/stream` with the same request body for server-sent events:
+The first request creates an in-memory chat session and returns its `session_id`. Send that ID with follow-up requests to continue the same provider conversation without resending the full message history. Sessions expire after four hours of inactivity and end when the API process stops; clients can end one earlier with `DELETE /api/v1/chat/sessions/{session_id}`.
+
+The synchronous response marks `format` as `markdown`, returns only the generated Markdown in `answer`, and keeps source details in the separate `sources` field. The answer does not contain an appended Sources section. `reasoning` defaults to `false`; set it to `true` to enable the selected model's reasoning capability and include its reasoning output. Unsupported models return a clear error. Search responses are unchanged.
+
+Use `/api/v1/ask/stream` with the same request body for server-sent events. Concatenate the `text` values from every `delta` event, then render the result as Markdown:
 
 ```text
+event: meta
+data: {"format":"markdown","session_id":"chat_...","reasoning":false}
+
 event: delta
-data: {"text":"partial answer"}
+data: {"text":"partial Markdown answer"}
 
 event: sources
 data: {"sources":[{"file_id":"file_...","path":"/Users/example/Documents/notes.md"}]}
 
 event: done
-data: {}
+data: {"session_id":"chat_..."}
 ```
 
 ## Open indexed files safely

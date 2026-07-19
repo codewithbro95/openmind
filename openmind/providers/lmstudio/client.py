@@ -20,12 +20,14 @@ DEFAULT_CHAT_MAX_TOKENS = 700
 class LMStudioChatResult:
     content: str
     reasoning: str = ""
+    response_id: str | None = None
 
 
 @dataclass(frozen=True)
 class LMStudioStreamDelta:
     content: str = ""
     reasoning: str = ""
+    response_id: str | None = None
 
 
 class LMStudioClient:
@@ -38,6 +40,7 @@ class LMStudioClient:
         self.base_url = base_url.rstrip("/")
         self.api_token = api_token or os.environ.get("LM_API_TOKEN")
         self.timeout = timeout
+        self._reasoning_settings: dict[tuple[str, bool], str | None] = {}
 
     @property
     def openai_base_url(self) -> str:
@@ -170,6 +173,97 @@ class LMStudioClient:
             reasoning = _extract_reasoning_from_mapping(delta)
             if content or reasoning:
                 yield LMStudioStreamDelta(content=content, reasoning=reasoning)
+
+    def native_chat(
+        self,
+        model: str,
+        input_text: str,
+        system_prompt: str | None,
+        previous_response_id: str | None = None,
+        store: bool = False,
+        reasoning: bool | None = None,
+    ) -> LMStudioChatResult:
+        payload: dict[str, Any] = {
+            "model": model,
+            "input": input_text,
+            "store": store,
+            "temperature": 0.2,
+            "max_output_tokens": DEFAULT_CHAT_MAX_TOKENS,
+        }
+        if system_prompt:
+            payload["system_prompt"] = system_prompt
+        if previous_response_id:
+            payload["previous_response_id"] = previous_response_id
+        self._apply_reasoning(payload, model, reasoning)
+        data = self._request("POST", "/api/v1/chat", payload)
+        return _parse_native_chat_result(data)
+
+    def native_chat_stream(
+        self,
+        model: str,
+        input_text: str,
+        system_prompt: str | None,
+        previous_response_id: str | None = None,
+        store: bool = False,
+        reasoning: bool | None = None,
+    ) -> Iterator[LMStudioStreamDelta]:
+        payload: dict[str, Any] = {
+            "model": model,
+            "input": input_text,
+            "store": store,
+            "temperature": 0.2,
+            "max_output_tokens": DEFAULT_CHAT_MAX_TOKENS,
+            "stream": True,
+        }
+        if system_prompt:
+            payload["system_prompt"] = system_prompt
+        if previous_response_id:
+            payload["previous_response_id"] = previous_response_id
+        self._apply_reasoning(payload, model, reasoning)
+
+        for event in self._stream_request("POST", "/api/v1/chat", payload):
+            event_type = str(event.get("type") or "")
+            if event_type == "message.delta":
+                content = event.get("content")
+                if isinstance(content, str) and content:
+                    yield LMStudioStreamDelta(content=content)
+            elif event_type == "reasoning.delta":
+                reasoning = event.get("content")
+                if isinstance(reasoning, str) and reasoning:
+                    yield LMStudioStreamDelta(reasoning=reasoning)
+            elif event_type == "chat.end":
+                result = event.get("result") or {}
+                response_id = result.get("response_id")
+                if isinstance(response_id, str) and response_id:
+                    yield LMStudioStreamDelta(response_id=response_id)
+            elif event_type == "error":
+                error = event.get("error") or {}
+                message = str(error.get("message") or "LM Studio could not complete the chat.")
+                raise LMStudioModelError(message)
+
+    def _apply_reasoning(
+        self,
+        payload: dict[str, Any],
+        model_key: str,
+        enabled: bool | None,
+    ) -> None:
+        if enabled is None:
+            return
+        cache_key = (model_key, enabled)
+        if cache_key not in self._reasoning_settings:
+            model = next((item for item in self.list_models() if item.key == model_key), None)
+            if model is None:
+                raise LMStudioModelError(
+                    f"Selected model is not available in LM Studio: {model_key}"
+                )
+            try:
+                self._reasoning_settings[cache_key] = model.reasoning_setting(enabled)
+            except ValueError as exc:
+                raise LMStudioModelError(str(exc)) from exc
+
+        setting = self._reasoning_settings[cache_key]
+        if setting is not None:
+            payload["reasoning"] = setting
 
     def respond_with_reasoning(
         self,
@@ -383,6 +477,35 @@ def _parse_response_result(data: dict[str, Any]) -> LMStudioChatResult:
     return LMStudioChatResult(
         content=content,
         reasoning="\n".join(dict.fromkeys(part for part in reasoning_parts if part)).strip(),
+        response_id=(str(data["id"]) if data.get("id") else None),
+    )
+
+
+def _parse_native_chat_result(data: dict[str, Any]) -> LMStudioChatResult:
+    content_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    for item in data.get("output") or []:
+        if not isinstance(item, dict):
+            continue
+        item_type = str(item.get("type") or "")
+        content = item.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        if item_type == "reasoning":
+            reasoning_parts.append(content.strip())
+        elif item_type == "message":
+            content_parts.append(content.strip())
+
+    content = "\n".join(content_parts).strip()
+    think_reasoning, visible_content = _extract_think_block(content)
+    if think_reasoning:
+        reasoning_parts.append(think_reasoning)
+        content = visible_content
+    response_id = data.get("response_id")
+    return LMStudioChatResult(
+        content=content,
+        reasoning="\n".join(reasoning_parts).strip(),
+        response_id=response_id if isinstance(response_id, str) else None,
     )
 
 
