@@ -66,7 +66,7 @@ See [FEATURES.md](FEATURES.md) for the complete shipped feature list and roadmap
 - LM Studio for local chat, embedding, and vision models
 - macOS, Linux, or another Python-supported environment
 
-OpenMind Core `0.0.6` uses LM Studio as its only user-facing provider. The older Sentence Transformers provider remains only as a development and test fallback.
+OpenMind currently uses LM Studio as its only user-facing provider. The older Sentence Transformers provider remains only as a development and test fallback.
 
 ## Install
 
@@ -473,7 +473,7 @@ Simple way to think about it:
 
 OpenMind uses a model provider abstraction for embeddings and answers.
 
-In `0.0.6`, the only implemented user-facing provider is LM Studio. OpenMind talks to LM Studio's local server endpoint; it does not use the LM Studio chat interface.
+The only currently implemented user-facing provider is LM Studio. OpenMind talks to LM Studio's local server endpoint; it does not use the LM Studio chat interface.
 
 OpenMind uses the provider endpoint for:
 

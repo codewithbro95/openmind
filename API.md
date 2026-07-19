@@ -167,7 +167,7 @@ Ask request:
 }
 ```
 
-The first request creates an in-memory chat session and returns its `session_id`. Send that ID with follow-up requests to continue the same provider conversation without resending the full message history. Sessions expire after four hours of inactivity and end when the API process stops; clients can end one earlier with `DELETE /api/v1/chat/sessions/{session_id}`.
+The first request creates an in-memory chat session and returns its `session_id`. Send that ID with follow-up requests to continue the same provider conversation without resending the full message history. Every request still searches local memory using its current question and sends fresh retrieved evidence to the model, so changing topics within a session does not reuse the first turn's sources. Sessions expire after four hours of inactivity and end when the API process stops; clients can end one earlier with `DELETE /api/v1/chat/sessions/{session_id}`.
 
 The synchronous response marks `format` as `markdown`, returns only the generated Markdown in `answer`, and keeps source details in the separate `sources` field. The answer does not contain an appended Sources section. `reasoning` defaults to `false`; set it to `true` to enable the selected model's reasoning capability and include its reasoning output. Unsupported models return a clear error. Search responses are unchanged.
 
