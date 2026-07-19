@@ -1,8 +1,9 @@
-from openmind.core.models import SearchResult
 from openmind.core.config import AppPaths
 from openmind.core.engine import OpenMindEngine
+from openmind.core.models import SearchResult
 from openmind.embeddings.provider import HashEmbeddingProvider
 from openmind.llm.answer import ContextOnlyAnswerProvider
+from openmind.retrieval.context import format_sources
 from openmind.retrieval.search import SearchService
 
 
@@ -27,7 +28,14 @@ class FakeVectorStore:
 
 
 class FakeStreamingAnswerProvider(ContextOnlyAnswerProvider):
-    def stream_answer(self, question, context, show_thinking=False, history=None):
+    def stream_answer(
+        self,
+        question,
+        context,
+        reasoning=False,
+        history=None,
+        session=None,
+    ):
         yield "The answer uses retrieved context."
 
 
@@ -41,14 +49,30 @@ def test_search_service_returns_ranked_results():
     assert results[0].score == 0.91
 
 
-def test_context_only_answer_returns_sources():
+def test_context_only_answer_returns_context_without_source_text():
     result = FakeVectorStore().search([], limit=1)[0]
 
     answer = ContextOnlyAnswerProvider().answer("What do I know about the holiday plan?", [result])
 
     assert "No LLM provider is configured" in answer
-    assert "/docs/holiday.md" in answer
     assert "Cabin holiday plan" in answer
+    assert "/docs/holiday.md" not in answer
+    assert "Sources" not in answer
+
+
+def test_ask_sources_are_markdown_file_links():
+    result = FakeVectorStore().search([], limit=1)[0]
+
+    assert format_sources([result]) == ["[/docs/holiday.md](file:///docs/holiday.md)"]
+
+
+def test_context_answer_handles_multiple_chunks_from_one_source():
+    result = FakeVectorStore().search([], limit=1)[0]
+    second_chunk = result.model_copy(update={"id": "chunk_2", "chunk_index": 1})
+
+    answer = ContextOnlyAnswerProvider().answer("What is in this file?", [result, second_chunk])
+
+    assert answer.count("Cabin holiday plan includes trail maps and meal prep.") == 2
 
 
 def test_conversation_search_query_includes_recent_history():
@@ -67,7 +91,19 @@ def test_conversation_search_query_includes_recent_history():
     assert "What about the checklist?" in query
 
 
-def test_streaming_ask_reports_retrieval_before_model_answer(tmp_path):
+def test_ending_chat_session_discards_local_provider_state():
+    engine = OpenMindEngine(embeddings=HashEmbeddingProvider())
+    session = engine.create_chat_session()
+    session.provider_state["response_id"] = "resp_private"
+
+    ended = engine.end_chat_session(session.id)
+
+    assert ended is True
+    assert session.provider_state == {}
+    assert engine.chat_session(session.id) is None
+
+
+def test_streaming_ask_starts_with_model_answer_without_retrieval_preamble(tmp_path):
     engine = OpenMindEngine(
         paths=AppPaths(
             home=tmp_path,
@@ -83,6 +119,4 @@ def test_streaming_ask_reports_retrieval_before_model_answer(tmp_path):
 
     chunks = list(engine.ask_stream("What is this about?", limit=1))
 
-    assert chunks[0].startswith("Found 1 relevant chunk(s) in local memory.")
-    assert "/docs/holiday.md" in chunks[0]
-    assert chunks[1] == "The answer uses retrieved context."
+    assert chunks == ["The answer uses retrieved context."]

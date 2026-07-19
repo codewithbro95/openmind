@@ -1,6 +1,6 @@
 from openmind.core.config import AppPaths
 from openmind.core.engine import OpenMindEngine
-from openmind.core.models import FileRecord, IndexSummary
+from openmind.core.models import FileRecord, IndexSummary, Source
 
 
 def test_worker_remains_paused_until_resume(tmp_path, monkeypatch):
@@ -74,6 +74,7 @@ def test_index_file_reports_already_indexed_file(tmp_path):
     )
     engine = OpenMindEngine(paths=paths)
     engine.init()
+    _add_test_source(engine, tmp_path)
     record = FileRecord(
         id="file_1",
         source_id="src_1",
@@ -107,6 +108,7 @@ def test_index_file_skips_unchanged_indexed_file_without_hashing(tmp_path, monke
     )
     engine = OpenMindEngine(paths=paths)
     engine.init()
+    _add_test_source(engine, tmp_path)
     file_path = tmp_path / "notes.md"
     file_path.write_text("Holiday planning notes", encoding="utf-8")
     stat = file_path.stat()
@@ -135,3 +137,15 @@ def test_index_file_skips_unchanged_indexed_file_without_hashing(tmp_path, monke
 
     assert summary.files_skipped == 1
     assert summary.files_already_indexed == 1
+
+
+def _add_test_source(engine, path):
+    engine.sqlite.add_source(
+        Source(
+            id="src_1",
+            path=str(path),
+            recursive=True,
+            enabled=True,
+            created_at="2026-07-05T00:00:00+00:00",
+        )
+    )

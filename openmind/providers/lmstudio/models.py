@@ -43,6 +43,42 @@ class LMStudioModel(BaseModel):
             for token in ("vision", "image", "multimodal", "vlm", "smolvlm", "llava")
         )
 
+    @property
+    def reasoning_options(self) -> tuple[str, ...]:
+        reasoning = self.capabilities.get("reasoning")
+        if not isinstance(reasoning, dict):
+            return ()
+        options = reasoning.get("allowed_options")
+        if not isinstance(options, list):
+            return ()
+        return tuple(str(option) for option in options)
+
+    @property
+    def default_reasoning(self) -> str | None:
+        reasoning = self.capabilities.get("reasoning")
+        if not isinstance(reasoning, dict):
+            return None
+        default = reasoning.get("default")
+        return str(default) if default is not None else None
+
+    def reasoning_setting(self, enabled: bool) -> str | None:
+        options = self.reasoning_options
+        if not options:
+            if enabled:
+                raise ValueError(f"The selected model does not support reasoning: {self.key}")
+            return None
+
+        if not enabled:
+            if "off" not in options:
+                raise ValueError(f"Reasoning cannot be disabled for the selected model: {self.key}")
+            return "off"
+
+        preferred = ("on", self.default_reasoning, "medium", "low", "high")
+        for setting in preferred:
+            if setting and setting != "off" and setting in options:
+                return setting
+        raise ValueError(f"Reasoning cannot be enabled for the selected model: {self.key}")
+
 
 def split_models(models: list[LMStudioModel]) -> tuple[list[LMStudioModel], list[LMStudioModel]]:
     chat_models = [model for model in models if model.type == "llm"]

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from openmind.core.models import SearchResult
 
 
@@ -34,5 +36,16 @@ def format_sources(results: list[SearchResult]) -> list[str]:
         if result.path in seen:
             continue
         seen.add(result.path)
-        sources.append(result.path)
+        sources.append(format_source_link(result))
     return sources
+
+
+def format_source_link(result: SearchResult) -> str:
+    path = Path(result.path).expanduser()
+    absolute_path = path if path.is_absolute() else path.resolve()
+    label = _escape_markdown_label(str(absolute_path))
+    return f"[{label}]({absolute_path.as_uri()})"
+
+
+def _escape_markdown_label(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")

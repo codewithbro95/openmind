@@ -85,7 +85,7 @@ curl http://127.0.0.1:8765/api/v1/search \
 | `PUT` | `/api/v1/models/selection` | Save validated model choices and optionally load them |
 | `GET` | `/api/v1/sources` | List user-approved source folders |
 | `POST` | `/api/v1/sources` | Add a source folder |
-| `DELETE` | `/api/v1/sources/{source_id}` | Remove source permission from OpenMind |
+| `DELETE` | `/api/v1/sources/{source_id}` | Remove a source and its indexed memory |
 | `POST` | `/api/v1/index/start` | Start or return the active background indexing job |
 | `GET` | `/api/v1/index/status` | Read indexing progress |
 | `POST` | `/api/v1/index/pause` | Request indexing pause |
@@ -94,6 +94,7 @@ curl http://127.0.0.1:8765/api/v1/search \
 | `POST` | `/api/v1/search` | Search indexed local memory |
 | `POST` | `/api/v1/ask` | Return an answer with structured sources |
 | `POST` | `/api/v1/ask/stream` | Stream answer text as server-sent events |
+| `DELETE` | `/api/v1/chat/sessions/{session_id}` | End an in-memory chat session |
 | `GET` | `/api/v1/documents/{file_id}` | Inspect an indexed file and its text chunks |
 | `POST` | `/api/v1/actions/open` | Open a validated indexed file in its default OS app |
 
@@ -108,9 +109,23 @@ Add a folder:
 }
 ```
 
-OpenMind resolves the path and rejects missing files, non-directory paths, and duplicate sources. Removing a source removes OpenMind's permission record; it does not delete the folder or its files.
+OpenMind resolves the path and rejects missing files, non-directory paths, and duplicate sources. Removing a source also removes its file records and searchable chunks from OpenMind, but never deletes the original folder or files. Source removal returns the number of file records and memory chunks removed and is refused while an indexing job is active.
+
+```json
+{
+  "source_id": "src_0123456789ab",
+  "source_path": "/Users/example/Documents",
+  "files_removed": 42,
+  "chunks_removed": 318,
+  "user_files_deleted": false
+}
+```
 
 ## Model selection
+
+The running API automatically reloads model and provider settings when `openmind models update` changes the local configuration. Status, Ask, search, image indexing, model loading, and provider requests therefore use the newly selected chat, embedding, image, and provider settings without restarting `openmind serve`.
+
+The model fields returned by `/api/v1/status` are the models currently selected for OpenMind to use. The `loaded` fields returned by `/api/v1/models` show whether each model is currently loaded in the model server.
 
 `GET /api/v1/models` separates chat, embedding, and image-capable models. Save selections with:
 
@@ -124,6 +139,8 @@ OpenMind resolves the path and rejects missing files, non-directory paths, and d
 ```
 
 The API validates every key against models reported by the configured provider. Set `chat_model` to `null` for search-only mode or `image_model` to `null` to disable image indexing. An embedding model is required.
+
+With `load: true`, OpenMind unloads previously selected models that are no longer needed before loading the new selection. It does not unload unrelated models that were loaded independently in LM Studio. The response includes separate `unload_results` and `load_results` arrays. With `load: false`, only the saved selection changes; loaded model instances are left untouched.
 
 ## Search and Ask
 
@@ -144,21 +161,30 @@ Ask request:
 {
   "question": "Do I have screenshots related to login errors?",
   "limit": 8,
-  "include_sources": true
+  "include_sources": true,
+  "reasoning": false,
+  "session_id": null
 }
 ```
 
-The synchronous response contains `answer` and structured `sources`. Use `/api/v1/ask/stream` with the same request body for server-sent events:
+The first request creates an in-memory chat session and returns its `session_id`. Send that ID with follow-up requests to continue the same provider conversation without resending the full message history. Sessions expire after four hours of inactivity and end when the API process stops; clients can end one earlier with `DELETE /api/v1/chat/sessions/{session_id}`.
+
+The synchronous response marks `format` as `markdown`, returns only the generated Markdown in `answer`, and keeps source details in the separate `sources` field. The answer does not contain an appended Sources section. `reasoning` defaults to `false`; set it to `true` to enable the selected model's reasoning capability and include its reasoning output. Unsupported models return a clear error. Search responses are unchanged.
+
+Use `/api/v1/ask/stream` with the same request body for server-sent events. Concatenate the `text` values from every `delta` event, then render the result as Markdown:
 
 ```text
+event: meta
+data: {"format":"markdown","session_id":"chat_...","reasoning":false}
+
 event: delta
-data: {"text":"partial answer"}
+data: {"text":"partial Markdown answer"}
 
 event: sources
 data: {"sources":[{"file_id":"file_...","path":"/Users/example/Documents/notes.md"}]}
 
 event: done
-data: {}
+data: {"session_id":"chat_..."}
 ```
 
 ## Open indexed files safely

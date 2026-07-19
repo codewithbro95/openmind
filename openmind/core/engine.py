@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Iterator
@@ -10,13 +12,24 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from openmind.core.config import AppPaths, OpenMindConfig
+from openmind.core.errors import SourceRemovalBlockedError
 from openmind.core.logging import append_log
-from openmind.core.models import Document, IndexJob, IndexSummary, SearchResult, Source, StatusSummary
+from openmind.core.models import (
+    Document,
+    IndexJob,
+    IndexSummary,
+    ModelTransitionResult,
+    SearchResult,
+    Source,
+    SourceRemovalResult,
+    StatusSummary,
+)
 from openmind.embeddings.provider import EmbeddingProvider, SentenceTransformerEmbeddingProvider
 from openmind.extractors import ExtractorRegistry, default_registry
 from openmind.ingestion.chunker import TextChunker
 from openmind.ingestion.normalizer import normalize_text
 from openmind.llm.answer import AnswerProvider, ContextOnlyAnswerProvider
+from openmind.llm.session import ChatSession
 from openmind.providers.lmstudio import (
     LMStudioClient,
     LMStudioEmbeddingProvider,
@@ -42,7 +55,10 @@ class OpenMindEngine:
         lance_store: LanceStore | None = None,
     ):
         self.paths = paths or AppPaths.from_env()
-        self.config = OpenMindConfig.load(self.paths.config_path)
+        self._config_lock = threading.RLock()
+        self._chat_sessions_lock = threading.RLock()
+        self._chat_sessions: dict[str, ChatSession] = {}
+        self.config, self._config_fingerprint = self._read_config_snapshot()
         self.sqlite = sqlite_store or SQLiteStore(self.paths.sqlite_path)
         self.lance = lance_store or LanceStore(self.paths.lancedb_path)
         self.sources = SourceManager(self.sqlite)
@@ -56,22 +72,55 @@ class OpenMindEngine:
         self.paths.ensure()
         self.sqlite.initialize()
         self.lance.initialize()
+        self._cleanup_orphaned_source_data()
         return self.paths
 
     def reload_config(self) -> OpenMindConfig:
-        self.config = OpenMindConfig.load(self.paths.config_path)
+        with self._config_lock:
+            config, fingerprint = self._read_config_snapshot()
+            self._apply_config(config, fingerprint)
+        return self.config
+
+    def reload_config_if_changed(self) -> bool:
+        with self._config_lock:
+            config, fingerprint = self._read_config_snapshot()
+            if fingerprint == self._config_fingerprint:
+                return False
+            self._apply_config(config, fingerprint)
+        self._log(
+            "config.reload",
+            "Reloaded configuration changed by another process",
+            provider=config.provider.name,
+            chat_model=config.models.chat_model,
+            embedding_model=config.models.embedding_model,
+            image_model=(config.extraction.images.model if config.extraction.images.enabled else None),
+        )
+        return True
+
+    def _apply_config(self, config: OpenMindConfig, fingerprint: str | None) -> None:
+        self.config = config
+        self._config_fingerprint = fingerprint
         self.embeddings = self._build_embedding_provider()
         self.answer_provider = self._build_answer_provider()
         self.extractors = self._build_extractor_registry()
-        return self.config
 
     def save_config(self, config: OpenMindConfig) -> None:
         self.paths.ensure()
-        config.save(self.paths.config_path)
-        self.config = config
-        self.embeddings = self._build_embedding_provider()
-        self.answer_provider = self._build_answer_provider()
-        self.extractors = self._build_extractor_registry()
+        with self._config_lock:
+            config.save(self.paths.config_path)
+            fingerprint = self._fingerprint(config.to_toml())
+            self._apply_config(config, fingerprint)
+
+    def _read_config_snapshot(self) -> tuple[OpenMindConfig, str | None]:
+        path = self.paths.config_path
+        if not path.exists():
+            return OpenMindConfig(), None
+        text = path.read_text(encoding="utf-8")
+        return OpenMindConfig.from_toml(text), self._fingerprint(text)
+
+    @staticmethod
+    def _fingerprint(text: str) -> str:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     def add_source(self, path: str, recursive: bool = True) -> Source:
         self.init()
@@ -81,9 +130,62 @@ class OpenMindEngine:
         self.init()
         return self.sources.list()
 
-    def remove_source(self, source_id: str) -> bool:
+    def remove_source(self, source_id: str) -> SourceRemovalResult | None:
         self.init()
-        return self.sources.remove(source_id)
+        active = self.sqlite.latest_unfinished_index_job()
+        if active is not None and self._is_stale_pending_job(active):
+            self.sqlite.update_index_job(
+                active.id,
+                status="failed",
+                error="Index worker did not start.",
+                completed_at=utc_now(),
+            )
+            active = None
+        if active is not None:
+            raise SourceRemovalBlockedError(
+                f"Cannot remove a source while indexing job {active.id} is {active.status}. "
+                "Stop indexing first with: openmind index stop"
+            )
+
+        source = self.sources.get(source_id)
+        if source is None:
+            return None
+        if not self.sources.set_enabled(source_id, False):
+            return None
+        try:
+            chunks_removed = self.lance.delete_source_chunks(source_id)
+        except Exception:
+            self.sources.set_enabled(source_id, True)
+            raise
+        files_removed = self.sources.remove(source_id)
+        if files_removed is None:
+            return None
+        self._log(
+            "source.remove",
+            "Removed source and indexed memory",
+            source_id=source_id,
+            path=source.path,
+            files_removed=files_removed,
+            chunks_removed=chunks_removed,
+        )
+        return SourceRemovalResult(
+            source_id=source.id,
+            source_path=source.path,
+            files_removed=files_removed,
+            chunks_removed=chunks_removed,
+        )
+
+    def _cleanup_orphaned_source_data(self) -> None:
+        for source_id in self.sqlite.orphaned_source_ids():
+            chunks_removed = self.lance.delete_source_chunks(source_id)
+            files_removed = self.sqlite.delete_files_for_source(source_id)
+            self._log(
+                "source.cleanup_orphan",
+                "Removed indexed memory left by a deleted source",
+                source_id=source_id,
+                files_removed=files_removed,
+                chunks_removed=chunks_removed,
+            )
 
     def index(self) -> IndexSummary:
         self.init()
@@ -293,14 +395,16 @@ class OpenMindEngine:
         self,
         question: str,
         limit: int = 5,
-        show_thinking: bool = False,
+        reasoning: bool = False,
         history: list[dict[str, str]] | None = None,
+        session: ChatSession | None = None,
     ) -> str:
         answer, _ = self.ask_with_sources(
             question,
             limit=limit,
-            show_thinking=show_thinking,
+            reasoning=reasoning,
             history=history,
+            session=session,
         )
         return answer
 
@@ -308,17 +412,47 @@ class OpenMindEngine:
         self,
         question: str,
         limit: int = 5,
-        show_thinking: bool = False,
+        reasoning: bool = False,
         history: list[dict[str, str]] | None = None,
+        session: ChatSession | None = None,
+    ) -> tuple[str, list[SearchResult]]:
+        if session is not None:
+            with session.lock:
+                return self._answer_with_sources(
+                    question,
+                    limit=limit,
+                    reasoning=reasoning,
+                    history=session.history,
+                    session=session,
+                )
+        return self._answer_with_sources(
+            question,
+            limit=limit,
+            reasoning=reasoning,
+            history=history,
+            session=None,
+        )
+
+    def _answer_with_sources(
+        self,
+        question: str,
+        *,
+        limit: int,
+        reasoning: bool,
+        history: list[dict[str, str]] | None,
+        session: ChatSession | None,
     ) -> tuple[str, list[SearchResult]]:
         self._log("ask.start", "Answering question", question=question, limit=limit)
         results = self.search(self._conversation_search_query(question, history), limit=limit)
         answer = self.answer_provider.answer(
             question,
             results,
-            show_thinking=show_thinking,
+            reasoning=reasoning,
             history=history,
+            session=session,
         )
+        if session is not None:
+            session.record_turn(question, _visible_answer_for_history(answer))
         self._log("ask.finish", "Answer finished", question=question, sources=len(results))
         return answer, results
 
@@ -326,14 +460,16 @@ class OpenMindEngine:
         self,
         question: str,
         limit: int = 5,
-        show_thinking: bool = False,
+        reasoning: bool = False,
         history: list[dict[str, str]] | None = None,
+        session: ChatSession | None = None,
     ) -> Iterator[str]:
         stream, _ = self.ask_stream_with_sources(
             question,
             limit=limit,
-            show_thinking=show_thinking,
+            reasoning=reasoning,
             history=history,
+            session=session,
         )
         yield from stream
 
@@ -341,39 +477,98 @@ class OpenMindEngine:
         self,
         question: str,
         limit: int = 5,
-        show_thinking: bool = False,
+        reasoning: bool = False,
         history: list[dict[str, str]] | None = None,
+        session: ChatSession | None = None,
     ) -> tuple[Iterator[str], list[SearchResult]]:
+        if session is not None:
+            session.lock.acquire()
+            history = session.history
         self._log("ask.start", "Streaming answer", question=question, limit=limit)
-        results = self.search(self._conversation_search_query(question, history), limit=limit)
+        try:
+            results = self.search(self._conversation_search_query(question, history), limit=limit)
+        except Exception:
+            if session is not None:
+                session.lock.release()
+            raise
 
         def stream() -> Iterator[str]:
-            if results:
-                yield _retrieval_preamble(results)
-            for chunk in self.answer_provider.stream_answer(
-                question,
-                results,
-                show_thinking=show_thinking,
-                history=history,
-            ):
-                yield chunk
-            self._log(
-                "ask.finish",
-                "Streaming answer finished",
-                question=question,
-                sources=len(results),
-            )
+            chunks: list[str] = []
+            try:
+                for chunk in self.answer_provider.stream_answer(
+                    question,
+                    results,
+                    reasoning=reasoning,
+                    history=history,
+                    session=session,
+                ):
+                    chunks.append(chunk)
+                    yield chunk
+                if session is not None:
+                    session.record_turn(
+                        question,
+                        _visible_answer_for_history("".join(chunks).strip()),
+                    )
+                self._log(
+                    "ask.finish",
+                    "Streaming answer finished",
+                    question=question,
+                    sources=len(results),
+                )
+            finally:
+                if session is not None:
+                    session.lock.release()
 
         return stream(), results
+
+    def create_chat_session(self) -> ChatSession:
+        with self._chat_sessions_lock:
+            self._prune_chat_sessions()
+            if len(self._chat_sessions) >= 256:
+                oldest = min(
+                    self._chat_sessions.values(),
+                    key=lambda existing: existing.updated_at,
+                )
+                oldest.reset()
+                self._chat_sessions.pop(oldest.id, None)
+            session = ChatSession()
+            self._chat_sessions[session.id] = session
+            return session
+
+    def chat_session(self, session_id: str) -> ChatSession | None:
+        with self._chat_sessions_lock:
+            self._prune_chat_sessions()
+            return self._chat_sessions.get(session_id)
+
+    def end_chat_session(self, session_id: str) -> bool:
+        with self._chat_sessions_lock:
+            session = self._chat_sessions.pop(session_id, None)
+            if session is None:
+                return False
+            session.reset()
+            return True
+
+    def _prune_chat_sessions(self, max_age_seconds: float = 4 * 60 * 60) -> None:
+        cutoff = time.monotonic() - max_age_seconds
+        expired = [
+            session_id
+            for session_id, session in self._chat_sessions.items()
+            if session.updated_at < cutoff
+        ]
+        for session_id in expired:
+            session = self._chat_sessions.pop(session_id, None)
+            if session is not None:
+                session.reset()
 
     def status(self) -> StatusSummary:
         self.init()
         return self.sqlite.status(app_home=str(self.paths.home))
 
-    def lmstudio_client(self) -> LMStudioClient:
+    def lmstudio_client(self, config: OpenMindConfig | None = None) -> LMStudioClient:
+        selected_config = config or self.config
         return LMStudioClient(
-            base_url=self.config.provider.base_url,
-            api_token=os.environ.get(self.config.provider.api_token_env),
+            base_url=selected_config.provider.base_url,
+            api_token=os.environ.get(selected_config.provider.api_token_env),
         )
 
     def provider_status(self) -> tuple[bool, str]:
@@ -394,13 +589,42 @@ class OpenMindEngine:
     def load_configured_models(self) -> list[dict]:
         loaded = []
         client = self.lmstudio_client()
-        if self.config.models.chat_model:
-            loaded.append(client.load_model_if_needed(self.config.models.chat_model))
-        if self.config.models.embedding_model:
-            loaded.append(client.load_model_if_needed(self.config.models.embedding_model))
-        if self.config.extraction.images.enabled and self.config.extraction.images.model:
-            loaded.append(client.load_model_if_needed(self.config.extraction.images.model))
+        for model_key in self._selected_model_keys(self.config):
+            loaded.append(client.load_model_if_needed(model_key))
         return loaded
+
+    def update_model_config(
+        self,
+        config: OpenMindConfig,
+        *,
+        load: bool = True,
+    ) -> ModelTransitionResult:
+        previous = self.config.model_copy(deep=True)
+        if not load:
+            self.save_config(config)
+            return ModelTransitionResult()
+
+        previous_keys = set(self._selected_model_keys(previous))
+        selected_keys = set(self._selected_model_keys(config))
+        unload_results: list[dict] = []
+        if previous.provider.name == "lmstudio":
+            unload_results = self.lmstudio_client(previous).unload_models_if_loaded(
+                previous_keys - selected_keys
+            )
+
+        self.save_config(config)
+        load_results = self.load_configured_models()
+        return ModelTransitionResult(
+            unload_results=unload_results,
+            load_results=load_results,
+        )
+
+    @staticmethod
+    def _selected_model_keys(config: OpenMindConfig) -> list[str]:
+        keys = [config.models.chat_model, config.models.embedding_model]
+        if config.extraction.images.enabled:
+            keys.append(config.extraction.images.model)
+        return list(dict.fromkeys(key for key in keys if key))
 
     def _build_extractor_registry(self) -> ExtractorRegistry:
         return default_registry(
@@ -438,6 +662,9 @@ class OpenMindEngine:
 
     def _index_file(self, file_record) -> IndexSummary:
         summary = IndexSummary()
+        if not self.sqlite.source_is_enabled(file_record.source_id):
+            summary.files_skipped += 1
+            return summary
         existing = self.sqlite.file_by_path(file_record.path)
         if existing and existing.status == "indexed":
             if _same_file_metadata(existing, file_record):
@@ -451,7 +678,7 @@ class OpenMindEngine:
                 file_record.status = "indexed"
                 file_record.indexed_at = existing.indexed_at
                 file_record.error = None
-                self.sqlite.upsert_file(file_record)
+                self.sqlite.upsert_file_if_source_enabled(file_record)
                 summary.files_skipped += 1
                 summary.files_already_indexed += 1
                 return summary
@@ -465,7 +692,7 @@ class OpenMindEngine:
             if not text:
                 file_record.status = "skipped"
                 file_record.error = extracted.metadata.get("ocr_error") or "No text extracted"
-                self.sqlite.upsert_file(file_record)
+                self.sqlite.upsert_file_if_source_enabled(file_record)
                 summary.files_skipped += 1
                 return summary
 
@@ -485,13 +712,16 @@ class OpenMindEngine:
             file_record.status = "indexed"
             file_record.indexed_at = utc_now()
             file_record.error = None
-            self.sqlite.upsert_file(file_record)
+            if not self.sqlite.upsert_file_if_source_enabled(file_record):
+                self.lance.delete_file_chunks(file_record.id)
+                summary.files_skipped += 1
+                return summary
             summary.files_indexed += 1
             summary.chunks_created += len(chunks)
         except Exception as exc:
             file_record.status = "error"
             file_record.error = str(exc)
-            self.sqlite.upsert_file(file_record)
+            self.sqlite.upsert_file_if_source_enabled(file_record)
             summary.errors += 1
         return summary
 
@@ -517,7 +747,10 @@ class OpenMindEngine:
         if not history:
             return question
         recent = history[-6:]
-        parts = [f"{item.get('role', 'message')}: {item.get('content', '')}" for item in recent]
+        parts = [
+            f"{item.get('role', 'message')}: {item.get('content', '')[-700:]}"
+            for item in recent
+        ]
         parts.append(f"user: {question}")
         return "\n".join(parts)
 
@@ -537,21 +770,7 @@ def _same_file_metadata(existing, candidate) -> bool:
     )
 
 
-def _retrieval_preamble(results: list[SearchResult]) -> str:
-    sources: list[str] = []
-    seen: set[str] = set()
-    for result in results:
-        if result.path in seen:
-            continue
-        seen.add(result.path)
-        sources.append(result.path)
-        if len(sources) == 3:
-            break
-    lines = [f"Found {len(results)} relevant chunk(s) in local memory."]
-    if sources:
-        lines.append("Top source(s):")
-        lines.extend(f"- {source}" for source in sources)
-    lines.append("")
-    lines.append("Generating answer:")
-    lines.append("")
-    return "\n".join(lines)
+def _visible_answer_for_history(answer: str) -> str:
+    if answer.startswith("## Thinking") and "## Answer" in answer:
+        return answer.split("## Answer", 1)[1].strip()
+    return answer

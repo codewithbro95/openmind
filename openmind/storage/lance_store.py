@@ -64,6 +64,18 @@ class LanceStore:
             return
         table.delete(f"file_id = '{file_id}'")
 
+    def delete_source_chunks(self, source_id: str) -> int:
+        if not re.fullmatch(r"src_[A-Za-z0-9_-]{1,64}", source_id):
+            raise ValueError("Invalid source id.")
+        table = self._table_or_none()
+        if table is None:
+            return 0
+        where = f"source_id = '{source_id}'"
+        chunks_removed = table.count_rows(where)
+        if chunks_removed:
+            table.delete(where)
+        return chunks_removed
+
     def search(self, vector: list[float], limit: int = 5) -> list[SearchResult]:
         table = self._table_or_none()
         if table is None:

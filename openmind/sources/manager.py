@@ -30,5 +30,11 @@ class SourceManager:
     def list(self, enabled_only: bool = False) -> list[Source]:
         return self.store.list_sources(enabled_only=enabled_only)
 
-    def remove(self, source_id: str) -> bool:
+    def get(self, source_id: str) -> Source | None:
+        return self.store.source_by_id(source_id)
+
+    def set_enabled(self, source_id: str, enabled: bool) -> bool:
+        return self.store.set_source_enabled(source_id, enabled)
+
+    def remove(self, source_id: str) -> int | None:
         return self.store.remove_source(source_id)

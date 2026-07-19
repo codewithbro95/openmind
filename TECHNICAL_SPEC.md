@@ -1,4 +1,4 @@
-# OpenMind Core 0.0.5 Technical Spec
+# OpenMind Core 0.0.6 Technical Spec
 
 ## Goal
 
@@ -271,6 +271,18 @@ openmind uninstall
 openmind uninstall --yes --package
 ```
 
+## Source Removal Flow
+
+`openmind source remove <id>` removes OpenMind's access to a source and unindexes its memory. It never modifies or deletes the original folder.
+
+1. Refuse removal while a background indexing job is unfinished.
+2. Mark the source disabled so concurrent foreground indexing cannot commit new records.
+3. Delete every LanceDB chunk with the source ID.
+4. Delete the source's SQLite file records and source record in one SQLite transaction.
+5. Report the file-record and chunk counts removed.
+
+File indexing verifies that its source is still enabled when committing its SQLite record. If a source was disabled concurrently, any chunks produced by that indexing operation are deleted. During initialization, OpenMind also removes orphan file records and chunks left by source removals performed by older versions.
+
 ## Setup Flow
 
 `openmind setup` must:
@@ -500,6 +512,8 @@ Native REST API:
 
 - `GET /api/v1/models`
 - `POST /api/v1/models/load`
+- `POST /api/v1/models/unload`
+- `POST /api/v1/chat`
 
 User-facing model loading must call `GET /api/v1/models` first and skip `POST /api/v1/models/load` when the selected model already has loaded instances.
 
@@ -511,7 +525,7 @@ OpenAI-compatible API:
 
 Multimodal image descriptions also use `POST /v1/chat/completions`, with image bytes sent only to the local model server request as a data URL. Those bytes are not persisted by OpenMind.
 
-`openmind ask --show-thinking` uses the Responses endpoint with a `reasoning` payload and displays reasoning only when LM Studio returns explicit reasoning/thinking text. OpenMind also handles chat responses that expose fields such as `reasoning_content`, `thinking`, or a visible `<think>...</think>` block.
+Ask consumes message and reasoning events from the native chat endpoint. Reasoning is disabled by default and enabled only when `--reasoning` or API `reasoning = true` is explicitly requested. OpenMind maps the boolean to a reasoning setting supported by the selected model.
 
 `openmind models update` re-runs provider and model selection after setup:
 
@@ -522,13 +536,18 @@ Multimodal image descriptions also use `POST /v1/chat/completions`, with image b
 5. Let the user choose a chat model, or search-only mode.
 6. Require one embedding model.
 7. Let the user choose an image description model or disable image indexing.
-8. Save the selected keys to `~/.openmind/config.toml`.
-9. Load the selected models unless `--no-load` is passed.
+8. Unless `--no-load` is passed, compute the previous OpenMind model keys that are absent from the new selection.
+9. Resolve those models' loaded instance IDs with `GET /api/v1/models` and unload each instance with `POST /api/v1/models/unload`.
+10. Save the selected keys to `~/.openmind/config.toml`.
+11. Load the selected models unless `--no-load` is passed.
+
+Only models from OpenMind's previous configuration are eligible for automatic unloading. Unchanged selections and unrelated models loaded directly in LM Studio are not unloaded. When `--no-load` is used, OpenMind updates configuration without changing model-server memory.
 
 `openmind ask` streams by default:
 
-- normal ask uses OpenAI-compatible `POST /v1/chat/completions` with `stream = true`
-- `--show-thinking` uses OpenAI-compatible `POST /v1/responses` with `stream = true`
+- normal Ask uses native `POST /api/v1/chat` with `stream = true`
+- interactive follow-ups use the previous native `response_id`
+- `--reasoning/--no-reasoning` controls model reasoning and displays native reasoning events when enabled
 - `--no-stream` uses the previous full-response behavior
 - sources are appended after streaming finishes
 
@@ -578,8 +597,14 @@ Search requires an embedding provider. Normal setup uses LM Studio embeddings.
 1. Run the search flow for the question.
 2. Build a compact context from retrieved chunks.
 3. If an LM Studio chat model is configured, generate an answer grounded only in context.
-4. If no answer provider is configured, return the top retrieved context and sources.
-5. Always show sources.
+4. If no answer provider is configured, return retrieved snippets without embedding source paths in the answer.
+5. Return the answer as GitHub-flavored Markdown.
+6. Keep generated answer text separate from structured retrieval sources.
+7. Append deduplicated `file://` source links only in the CLI presentation layer.
+
+Interactive CLI and API chat use LM Studio's native stateful `POST /api/v1/chat` endpoint. The first turn stores the provider conversation and captures its `response_id`; follow-ups send only the current question, current retrieved evidence, and `previous_response_id`. OpenMind retains a bounded local history only to improve retrieval queries. One-shot CLI Ask remains stateless.
+
+The synchronous API identifies Ask output with `format = "markdown"`, returns an opaque OpenMind `session_id`, and accepts that ID on follow-ups. The streaming API emits the session ID and Markdown format in its initial `meta` event. `reasoning` defaults to false and controls whether model reasoning is generated and returned. Sources remain available only through the structured `sources` field or SSE event, not appended to generated API text. Search output is unchanged.
 
 ## Background Indexing
 
@@ -663,7 +688,7 @@ openmind dev logs --lm-studio
 
 ## Local API
 
-`openmind serve` starts a single-process FastAPI application at `127.0.0.1:8765`. The CLI does not expose a host option; remote network binding is outside the `0.0.5` security model.
+`openmind serve` starts a single-process FastAPI application at `127.0.0.1:8765`. The CLI does not expose a host option; remote network binding is outside the `0.0.6` security model.
 
 The public liveness route is:
 
@@ -687,7 +712,8 @@ Protected capabilities:
 - source listing, addition, and removal
 - background indexing start, pause, resume, status, and stop
 - search with structured source records
-- synchronous and server-sent-event Ask, including structured source events
+- stateful synchronous and server-sent-event Ask, including structured source events
+- opt-in model reasoning for API clients
 - indexed file and chunk details
 - opening an indexed file in its default operating-system application
 
@@ -710,6 +736,10 @@ FastAPI lifespan initializes one shared `OpenMindEngine` before requests are acc
 
 The client contract and examples are documented in [API.md](API.md).
 
+### Runtime Configuration Synchronization
+
+The API keeps one shared engine instance, but the CLI can update `config.toml` from another process. Configuration saves use an atomic same-directory file replacement. Before each authenticated API request, the engine fingerprints the complete config snapshot and reloads only when it changed. Reloading rebuilds the chat, embedding, image-description, extractor, and provider clients together so status and inference use one consistent configuration.
+
 ## Acceptance Tests
 
 The first acceptable build must prove:
@@ -717,6 +747,9 @@ The first acceptable build must prove:
 - `openmind init` creates app data directories and SQLite tables.
 - `openmind source add <path>` records a user-approved source.
 - `openmind source list` shows recorded sources.
+- Removing a source deletes only its SQLite records and LanceDB chunks while preserving user files.
+- Source removal cannot race an unfinished background indexing job.
+- Initialization cleans indexed data orphaned by legacy source removal behavior.
 - Scanner finds supported files and ignores noisy folders.
 - Extractors turn supported test files into text.
 - Image extractor stores generated descriptions/OCR text, not raw image bytes.

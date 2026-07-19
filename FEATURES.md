@@ -55,6 +55,9 @@ Current boundaries:
 
 ### Source Management
 
+- Removing a source also removes its SQLite file records and LanceDB memory chunks.
+- Original source folders and files are never deleted.
+- Indexed data left by sources removed with older versions is cleaned up automatically.
 - User-approved folders only.
 - Re-adding an existing source reports that it is already registered.
 - Recursive folder scanning.
@@ -120,15 +123,13 @@ Image files are indexed by generating text descriptions through a local vision m
 
 ### LM Studio Provider
 
-- LM Studio is the only user-facing `0.0.5` provider.
+- LM Studio is the only user-facing `0.0.6` provider.
 - Native LM Studio REST model listing:
   - `GET /api/v1/models`
 - Native LM Studio model loading:
   - `POST /api/v1/models/load`
-- OpenAI-compatible chat:
-  - `POST /v1/chat/completions`
-- OpenAI-compatible responses with reasoning support:
-  - `POST /v1/responses`
+- Native stateful chat with response-ID continuation and reasoning events:
+  - `POST /api/v1/chat`
 - OpenAI-compatible embeddings:
   - `POST /v1/embeddings`
 - OpenAI-compatible multimodal chat for image descriptions:
@@ -144,6 +145,8 @@ Image files are indexed by generating text descriptions through a local vision m
 - Interactive model re-selection from the latest LM Studio model list.
 - Saves separate chat, embedding, and image description model choices.
 - Can load newly selected models immediately or save only with `--no-load`.
+- Unloads previous OpenMind model selections that are no longer used before loading replacements.
+- Leaves unrelated models loaded independently in LM Studio untouched.
 - Skips model loading when LM Studio reports the model is already loaded.
 
 ### Search
@@ -157,6 +160,10 @@ Image files are indexed by generating text descriptions through a local vision m
 
 - `openmind ask "<question>"`
 - Search plus source-grounded answer.
+- Uses GitHub-flavored Markdown for headings, lists, tables, code blocks, and links.
+- Identifies synchronous and streaming API answers as Markdown.
+- Keeps generated API text separate from structured source records.
+- Makes model reasoning opt-in for API clients and disabled by default.
 - Streams answer tokens by default.
 - Supports `--no-stream`.
 - Always shows sources.
@@ -168,8 +175,9 @@ Image files are indexed by generating text descriptions through a local vision m
 ### Interactive Ask
 
 - Bare `openmind ask` opens an interactive chat session.
-- Session history is kept in memory while the process is open.
-- Follow-up questions use recent session history for retrieval and prompting.
+- Uses the provider's stateful chat continuation ID instead of resending full model history.
+- Keeps a short session history in OpenMind only for follow-up retrieval.
+- API requests return an opaque session ID that clients can reuse or explicitly end.
 - Session history is discarded when the process exits.
 - Commands inside chat:
   - `/clear`
@@ -177,14 +185,14 @@ Image files are indexed by generating text descriptions through a local vision m
   - `/quit`
 - Interactive flags:
   - `--stream/--no-stream`
-  - `--show-thinking`
+  - `--reasoning/--no-reasoning`
   - `--limit`
 
 ### Thinking and Reasoning Display
 
-- `openmind ask "..." --show-thinking`
+- `openmind ask "..." --reasoning`
 - Works in one-shot and interactive chat modes.
-- Displays provider-returned thinking/reasoning only when LM Studio exposes it.
+- Enables and displays reasoning only when the selected model supports it.
 - Supports:
   - Responses reasoning output.
   - `reasoning_content`
@@ -233,6 +241,7 @@ Image files are indexed by generating text descriptions through a local vision m
 - Random local API token stored with private file permissions.
 - `openmind api token` shows the client token.
 - `openmind api token --rotate` invalidates the existing token.
+- Running API clients automatically see provider and model changes saved by the CLI.
 - Status and model-provider inspection.
 - Model listing, validated selection, and loading.
 - Source listing, creation, and removal.

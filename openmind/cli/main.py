@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ import typer
 from questionary import Choice, Style
 from rich.console import Console
 from rich.live import Live
+from rich.markdown import Markdown
 from rich.progress import Progress
 from rich.prompt import Prompt
 from rich.table import Table
@@ -28,9 +30,11 @@ from openmind.core.config import (
     ProviderSettings,
 )
 from openmind.core.engine import OpenMindEngine
-from openmind.core.models import IndexJob, IndexSummary
+from openmind.core.errors import SourceRemovalBlockedError
+from openmind.core.models import IndexJob, IndexSummary, SearchResult
 from openmind.providers.lmstudio.errors import LMStudioConnectionError, LMStudioError
 from openmind.providers.lmstudio.models import LMStudioModel, split_models, vision_models
+from openmind.retrieval.context import format_sources
 
 app = typer.Typer(help="OpenMind local AI memory engine.")
 source_app = typer.Typer(help="Manage user-approved folders.")
@@ -207,12 +211,22 @@ def source_list() -> None:
     _print_sources(engine().list_sources())
 
 
-@source_app.command("remove")
+@source_app.command(
+    "remove",
+    help="Remove a source and its indexed memory without deleting user files.",
+)
 def source_remove(source_id: str) -> None:
-    removed = engine().remove_source(source_id)
-    if not removed:
+    try:
+        result = engine().remove_source(source_id)
+    except SourceRemovalBlockedError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if result is None:
         raise typer.BadParameter(f"Unknown source id: {source_id}")
-    console.print(f"[green]Removed source[/green] {source_id}")
+    console.print(f"[green]Removed source[/green] {result.source_id}")
+    console.print(f"File records removed: {result.files_removed}")
+    console.print(f"Memory chunks removed: {result.chunks_removed}")
+    console.print(f"Original folder and files were not deleted: {result.source_path}")
 
 
 @index_app.callback(invoke_without_command=True)
@@ -372,7 +386,7 @@ def models_update(
 ) -> None:
     current = engine()
     current.init()
-    config = current.config
+    config = current.config.model_copy(deep=True)
     current_provider_name = config.provider.name
     current_chat_model = config.models.chat_model if current_provider_name == "lmstudio" else ""
     current_embedding_model = (
@@ -403,11 +417,9 @@ def models_update(
         base_url=base_url,
         api_token_env=config.provider.api_token_env or "LM_API_TOKEN",
     )
-    current.save_config(config)
-
     console.print(f"Fetching LM Studio models from {base_url}...")
     try:
-        models = current.list_lmstudio_models()
+        models = current.lmstudio_client(config).list_models()
     except LMStudioConnectionError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
@@ -441,30 +453,27 @@ def models_update(
     config.models.embedding_model = embedding_model_key
     config.extraction.images.enabled = bool(image_model_key)
     config.extraction.images.model = image_model_key or DEFAULT_IMAGE_DESCRIPTION_MODEL
-    current.save_config(config)
-    console.print("[green]Saved model configuration.[/green]")
+    try:
+        transition = current.update_model_config(config, load=load)
+    except LMStudioError as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        if current.config == config:
+            console.print("The new selection was saved. Retry loading with: openmind models load")
+        else:
+            console.print("The model update was not completed. Check LM Studio and try again.")
+        return
 
+    console.print("[green]Saved model configuration.[/green]")
     if not load:
         console.print("Run `openmind models load` when you are ready to load the selected models.")
         return
 
-    console.print("Loading selected models...")
-    try:
-        client = current.lmstudio_client()
-        results = []
-        if chat_model_key:
-            results.append(_load_lmstudio_model(client, chat_model_key, "Chat model"))
-        else:
-            console.print("[yellow]Search-only mode enabled because no chat model was selected.[/yellow]")
-        results.append(_load_lmstudio_model(client, embedding_model_key, "Embedding model"))
-        if image_model_key:
-            results.append(_load_lmstudio_model(client, image_model_key, "Image description model"))
-        else:
-            console.print("[yellow]Image indexing disabled.[/yellow]")
-        _print_model_load_summary(results)
-    except LMStudioError as exc:
-        console.print(f"[yellow]{exc}[/yellow]")
-        console.print("You can retry loading models with: openmind models load")
+    _print_model_unload_summary(transition.unload_results)
+    if not chat_model_key:
+        console.print("[yellow]Search-only mode enabled because no chat model was selected.[/yellow]")
+    if not image_model_key:
+        console.print("[yellow]Image indexing disabled.[/yellow]")
+    _print_model_load_summary(transition.load_results)
 
 
 @provider_app.command("status")
@@ -588,28 +597,33 @@ def ask_command(
     question: str | None = typer.Argument(None),
     limit: int = typer.Option(5, min=1, max=20),
     stream: bool = typer.Option(True, "--stream/--no-stream", help="Stream answer tokens."),
-    show_thinking: bool = typer.Option(
+    reasoning: bool = typer.Option(
         False,
-        "--show-thinking",
-        help="Show provider-returned thinking/reasoning when the model exposes it.",
+        "--reasoning/--no-reasoning",
+        help="Enable or disable model reasoning.",
     ),
 ) -> None:
     if question is None:
-        _interactive_ask(limit=limit, stream=stream, show_thinking=show_thinking)
+        _interactive_ask(limit=limit, stream=stream, reasoning=reasoning)
         return
 
     try:
         current = engine()
         if stream:
-            for chunk in current.ask_stream(
+            answer_stream, sources = current.ask_stream_with_sources(
                 question,
                 limit=limit,
-                show_thinking=show_thinking,
-            ):
-                console.print(chunk, end="", markup=False, highlight=False, soft_wrap=True)
-            console.print()
+                reasoning=reasoning,
+            )
+            _render_markdown_stream(answer_stream)
         else:
-            console.print(current.ask(question, limit=limit, show_thinking=show_thinking))
+            answer, sources = current.ask_with_sources(
+                question,
+                limit=limit,
+                reasoning=reasoning,
+            )
+            console.print(Markdown(answer))
+        _print_ask_sources(sources)
     except LMStudioError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
@@ -794,9 +808,9 @@ def uninstall_command(
         console.print("uv pip uninstall openmind-core")
 
 
-def _interactive_ask(limit: int, stream: bool, show_thinking: bool) -> None:
+def _interactive_ask(limit: int, stream: bool, reasoning: bool) -> None:
     current = engine()
-    history: list[dict[str, str]] = []
+    session = current.create_chat_session()
     console.print("[bold]OpenMind chat[/bold]")
     console.print("Ask questions about your local memory. Type /exit to leave, /clear to reset.")
     while True:
@@ -804,6 +818,7 @@ def _interactive_ask(limit: int, stream: bool, show_thinking: bool) -> None:
             question = Prompt.ask("[bold cyan]you[/bold cyan]").strip()
         except (KeyboardInterrupt, EOFError):
             console.print("\n[yellow]Closed OpenMind chat.[/yellow]")
+            current.end_chat_session(session.id)
             return
 
         if not question:
@@ -811,40 +826,51 @@ def _interactive_ask(limit: int, stream: bool, show_thinking: bool) -> None:
         command = question.lower()
         if command in {"/exit", "/quit", "exit", "quit"}:
             console.print("[yellow]Closed OpenMind chat.[/yellow]")
+            current.end_chat_session(session.id)
             return
         if command == "/clear":
-            history.clear()
+            session.reset()
             console.print("[green]Session memory cleared.[/green]")
             continue
 
-        console.print("[bold green]openmind[/bold green] ", end="")
+        console.print("[bold green]openmind[/bold green]")
         try:
             if stream:
-                chunks: list[str] = []
-                for chunk in current.ask_stream(
+                answer_stream, sources = current.ask_stream_with_sources(
                     question,
                     limit=limit,
-                    show_thinking=show_thinking,
-                    history=history,
-                ):
-                    chunks.append(chunk)
-                    console.print(chunk, end="", markup=False, highlight=False, soft_wrap=True)
-                console.print()
-                answer = "".join(chunks).strip()
-            else:
-                answer = current.ask(
-                    question,
-                    limit=limit,
-                    show_thinking=show_thinking,
-                    history=history,
+                    reasoning=reasoning,
+                    session=session,
                 )
-                console.print(answer)
+                _render_markdown_stream(answer_stream)
+            else:
+                answer, sources = current.ask_with_sources(
+                    question,
+                    limit=limit,
+                    reasoning=reasoning,
+                    session=session,
+                )
+                console.print(Markdown(answer))
+            _print_ask_sources(sources)
         except LMStudioError as exc:
             console.print(f"[red]{exc}[/red]")
             continue
 
-        history.append({"role": "user", "content": question})
-        history.append({"role": "assistant", "content": answer})
+
+def _render_markdown_stream(chunks: Iterable[str]) -> str:
+    collected: list[str] = []
+    with Live(Markdown(""), console=console, refresh_per_second=12) as live:
+        for chunk in chunks:
+            collected.append(chunk)
+            live.update(Markdown("".join(collected)))
+    return "".join(collected).strip()
+
+
+def _print_ask_sources(results: list[SearchResult]) -> None:
+    sources = format_sources(results)
+    if not sources:
+        return
+    console.print(Markdown("## Sources\n" + "\n".join(f"- {source}" for source in sources)))
 
 
 def _choose_model(
@@ -1019,6 +1045,15 @@ def _print_model_load_summary(results: list[dict]) -> None:
         f"[green]Configured models ready[/green] "
         f"({loaded_count} loaded, {skipped_count} already loaded)"
     )
+
+
+def _print_model_unload_summary(results: list[dict]) -> None:
+    for result in results:
+        model_key = result.get("model", "")
+        if result.get("skipped"):
+            console.print(f"[dim]Previous model was not loaded: {model_key}[/dim]")
+        else:
+            console.print(f"[green]✓[/green] Previous model unloaded: {model_key}")
 
 
 def _print_existing_source_status(current: OpenMindEngine, path: str) -> None:
