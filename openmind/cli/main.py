@@ -38,11 +38,13 @@ index_app = typer.Typer(help="Index local files.")
 models_app = typer.Typer(help="Manage LM Studio models.")
 provider_app = typer.Typer(help="Inspect provider status.")
 dev_app = typer.Typer(help="Developer tools.")
+api_app = typer.Typer(help="Manage local API access.")
 app.add_typer(source_app, name="source")
 app.add_typer(index_app, name="index")
 app.add_typer(models_app, name="models")
 app.add_typer(provider_app, name="provider")
 app.add_typer(dev_app, name="dev")
+app.add_typer(api_app, name="api")
 console = Console()
 
 OPENMIND_BANNER = r"""
@@ -472,6 +474,70 @@ def provider_status() -> None:
     console.print(f"[{color}]{message}[/{color}]")
 
 
+@app.command("serve", help="Start the authenticated local OpenMind API.")
+def serve_command(
+    port: int = typer.Option(8765, min=1, max=65535, help="Local API port."),
+    allow_origin: list[str] | None = typer.Option(
+        None,
+        "--allow-origin",
+        help="Allow an exact browser origin. Repeat for multiple origins; wildcards are refused.",
+    ),
+) -> None:
+    from openmind.api.app import create_app
+    from openmind.api.auth import ensure_api_token, token_path
+
+    current = engine()
+    current.init()
+    ensure_api_token(current.paths.home)
+    origins = [_validate_api_origin(origin) for origin in (allow_origin or [])]
+
+    console.print("[bold]OpenMind local API[/bold]")
+    console.print(f"Server: http://127.0.0.1:{port}")
+    console.print(f"Docs: http://127.0.0.1:{port}/docs")
+    console.print(f"API token: {token_path(current.paths.home)}")
+    console.print("The server accepts local connections only. Press Ctrl+C to stop.")
+
+    import uvicorn
+
+    uvicorn.run(
+        create_app(
+            engine=current,
+            allowed_origins=origins,
+        ),
+        host="127.0.0.1",
+        port=port,
+        log_level="info",
+        access_log=False,
+    )
+
+
+@api_app.command("token", help="Show or rotate the local API bearer token.")
+def api_token_command(
+    rotate: bool = typer.Option(
+        False,
+        "--rotate",
+        help="Replace the API token and invalidate existing client credentials.",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip rotation confirmation."),
+) -> None:
+    from openmind.api.auth import ensure_api_token, rotate_api_token
+
+    current = engine()
+    current.init()
+    if rotate:
+        if not yes and not typer.confirm(
+            "Rotate the API token and disconnect clients using the current token?",
+            default=False,
+        ):
+            console.print("[yellow]Token rotation cancelled.[/yellow]")
+            return
+        token = rotate_api_token(current.paths.home)
+        console.print("[green]API token rotated.[/green]")
+    else:
+        token = ensure_api_token(current.paths.home)
+    console.print(token, markup=False, highlight=False)
+
+
 @dev_app.command("logs")
 def dev_logs(
     follow: bool = typer.Option(True, "--follow/--no-follow", help="Keep watching for new log lines."),
@@ -605,6 +671,7 @@ def flush_command(
     console.print()
     console.print("Will keep:")
     console.print(f"- Config: {current.paths.config_path}")
+    console.print(f"- Local API token: {home / 'api_token'}")
     if not include_sources:
         console.print("- Saved source folder records")
     console.print("- User source folders and files")
@@ -688,6 +755,7 @@ def uninstall_command(
     console.print("This removes OpenMind-owned local data:")
     console.print(f"- App home: {home}")
     console.print(f"- Config: {current.paths.config_path}")
+    console.print(f"- Local API token: {home / 'api_token'}")
     console.print(f"- SQLite state: {current.paths.sqlite_path}")
     console.print(f"- LanceDB memory: {current.paths.lancedb_path}")
     console.print(f"- Logs: {current.paths.logs_path}")
@@ -924,6 +992,15 @@ def _text_prompt(message: str, default: str = "") -> str:
     if answer is None:
         raise typer.Abort()
     return answer.strip()
+
+
+def _validate_api_origin(origin: str) -> str:
+    try:
+        from openmind.api.cors import validate_cors_origin
+
+        return validate_cors_origin(origin)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _load_lmstudio_model(client, model_key: str, label: str) -> dict:

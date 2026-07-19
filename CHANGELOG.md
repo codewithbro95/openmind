@@ -4,9 +4,15 @@ User-facing changes for each OpenMind Core release.
 
 ## Unreleased
 
+- No unreleased changes.
+
+## 0.0.5 - 2026-07-19
+
 - Added `openmind --version` and clearer command descriptions.
 - Added arrow-key setup menus, checkbox folder selection, and an OpenMind terminal banner.
-- Fixed custom folder selection so standard folders are not selected automatically.
+- Fixed a bug with custom folder selection so standard folders are not selected automatically.
+- Added a secure local API so anyone can easily build their own client app on top of OpenMind.
+  - Apps can manage models, sources, and indexing, search local memory, stream answers, inspect results, and open indexed files.
 
 ## 0.0.4 - 2026-07-15
 

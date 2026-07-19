@@ -118,6 +118,7 @@ Tests should be focused and practical.
 Add tests when you change:
 
 - CLI behavior.
+- Local API routes, authentication, validation, or response schemas.
 - SQLite schema or persistence.
 - Source scanning.
 - Extraction or chunking.
@@ -126,6 +127,8 @@ Add tests when you change:
 - Background indexing job state.
 
 Mock LM Studio for provider tests. Do not require contributors to run a local model just to pass the default test suite.
+
+API changes must preserve the security boundaries documented in [API.md](API.md). Keep the server loopback-only, require authentication for product routes, validate request bodies, and never expose vectors, raw databases, arbitrary filesystem reads, or shell execution.
 
 ## Privacy and Safety
 

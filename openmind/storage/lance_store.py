@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -70,8 +71,35 @@ class LanceStore:
         rows = table.search(vector).limit(limit).to_list()
         return [self._result_from_row(row) for row in rows]
 
+    def count_chunks(self) -> int:
+        table = self._table_or_none()
+        return table.count_rows() if table is not None else 0
+
+    def chunks_for_file(self, file_id: str, limit: int = 1000) -> list[dict[str, Any]]:
+        if not re.fullmatch(r"file_[0-9a-f]{16}", file_id):
+            raise ValueError("Invalid file id.")
+        table = self._table_or_none()
+        if table is None:
+            return []
+        rows = (
+            table.search()
+            .where(f"file_id = '{file_id}'")
+            .limit(limit)
+            .to_list()
+        )
+        return [
+            {
+                "id": str(row["id"]),
+                "text": str(row.get("text", "")),
+                "chunk_index": int(row.get("chunk_index", 0)),
+                "title": str(row.get("title", "")),
+                "metadata": self._parse_metadata(row.get("metadata")),
+            }
+            for row in rows
+        ]
+
     def _table_or_none(self):
-        if self.table_name not in self.db.table_names():
+        if self.table_name not in self.db.list_tables().tables:
             return None
         return self.db.open_table(self.table_name)
 
@@ -80,11 +108,7 @@ class LanceStore:
         score = 1.0 / (1.0 + distance)
         text = str(row.get("text", ""))
         snippet = text[:280].replace("\n", " ").strip()
-        metadata_raw = row.get("metadata") or "{}"
-        try:
-            metadata = json.loads(metadata_raw)
-        except json.JSONDecodeError:
-            metadata = {}
+        metadata = self._parse_metadata(row.get("metadata"))
         return SearchResult(
             id=str(row["id"]),
             path=str(row["path"]),
@@ -95,4 +119,16 @@ class LanceStore:
             score=score,
             chunk_index=int(row["chunk_index"]),
             metadata=metadata,
+            file_id=str(row.get("file_id", "")),
+            source_id=str(row.get("source_id", "")),
+            extension=str(row.get("extension", "")),
         )
+
+    def _parse_metadata(self, metadata_raw: Any) -> dict[str, Any]:
+        metadata_raw = metadata_raw or "{}"
+        if isinstance(metadata_raw, dict):
+            return metadata_raw
+        try:
+            return json.loads(str(metadata_raw))
+        except (json.JSONDecodeError, TypeError):
+            return {}

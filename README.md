@@ -28,7 +28,7 @@ I am building this because I have a lot of files on my computer, and sometimes I
 
 ## What OpenMind Does
 
-OpenMind Core is a local-first CLI for indexing, searching, and asking questions over user-approved folders.
+OpenMind Core is a local-first engine, CLI, and authenticated local API for indexing, searching, and asking questions over user-approved folders.
 
 - Local app storage under `~/.openmind`.
 - User-approved folder sources.
@@ -41,6 +41,7 @@ OpenMind Core is a local-first CLI for indexing, searching, and asking questions
 - Interactive ask sessions with temporary conversation memory.
 - Source-grounded answers.
 - Developer log inspection.
+- Versioned local API for third-party client applications.
 
 OpenMind intentionally avoids:
 
@@ -60,7 +61,7 @@ See [FEATURES.md](FEATURES.md) for the complete shipped feature list and roadmap
 - LM Studio for local chat, embedding, and vision models
 - macOS, Linux, or another Python-supported environment
 
-OpenMind Core `0.0.4` uses LM Studio as its only user-facing provider. The older Sentence Transformers provider remains only as a development and test fallback.
+OpenMind Core `0.0.5` uses LM Studio as its only user-facing provider. The older Sentence Transformers provider remains only as a development and test fallback.
 
 ## Install
 
@@ -262,6 +263,30 @@ openmind dev logs --log index
 openmind dev logs --lm-studio
 ```
 
+Local API:
+
+```bash
+openmind serve
+openmind serve --port 9000
+openmind serve --allow-origin http://localhost:3000
+openmind api token
+openmind api token --rotate
+```
+
+## Local API
+
+OpenMind exposes the same engine used by the CLI through an authenticated, versioned API for desktop apps, editor extensions, menu-bar tools, and other local clients:
+
+```text
+http://127.0.0.1:8765/api/v1
+```
+
+Start it with `openmind serve`. OpenMind creates a private bearer token under `~/.openmind/api_token`; retrieve it with `openmind api token` and send it as `Authorization: Bearer <token>`. The server binds only to `127.0.0.1`, disables browser CORS by default, and never exposes raw database operations, vectors, embeddings, or arbitrary filesystem access.
+
+The API supports status, providers and models, source management, background indexing controls, search, synchronous and streaming Ask, indexed document details, and safe opening of indexed files. Interactive OpenAPI documentation is available at `http://127.0.0.1:8765/docs` while the server is running.
+
+See [API.md](API.md) for the complete client contract, security model, endpoint reference, and request examples.
+
 ## LM Studio Integration
 
 OpenMind talks to LM Studio at:
@@ -331,12 +356,17 @@ The current local model server is LM Studio. The provider layer is designed for 
 ```mermaid
 flowchart TD
     User["User"] --> CLI["OpenMind CLI"]
+    Clients["Local Client Apps"] --> API["Authenticated Local API<br/>127.0.0.1 / api/v1"]
 
     CLI --> Setup["Setup / Config"]
     CLI --> Sources["Source Manager"]
     CLI --> Indexing["Indexing Engine"]
     CLI --> Search["Search"]
     CLI --> Ask["Ask"]
+    API --> Sources
+    API --> Indexing
+    API --> Search
+    API --> Ask
 
     Setup --> Config["~/.openmind/config.toml"]
     Setup --> ModelServer["Local Model Server<br/>(LM Studio, other providers later)"]
@@ -415,7 +445,7 @@ Simple way to think about it:
 
 OpenMind uses a model provider abstraction for embeddings and answers.
 
-In `0.0.4`, the only implemented user-facing provider is LM Studio. OpenMind talks to LM Studio's local server endpoint; it does not use the LM Studio chat interface.
+In `0.0.5`, the only implemented user-facing provider is LM Studio. OpenMind talks to LM Studio's local server endpoint; it does not use the LM Studio chat interface.
 
 OpenMind uses the provider endpoint for:
 
@@ -443,6 +473,18 @@ Why they are used:
 - Typer keeps commands small and type-friendly
 - Rich makes tables, progress views, and errors easier to read
 - the CLI stays usable before any desktop or web UI exists
+
+### FastAPI
+
+FastAPI exposes OpenMind's product-level engine capabilities to local client applications.
+
+Why it is used:
+
+- typed request and response contracts
+- automatic OpenAPI documentation for client developers
+- standard bearer authentication
+- streaming responses for Ask
+- the API remains separate from SQLite, LanceDB, and provider internals
 
 ### uv
 
@@ -853,7 +895,6 @@ Near-term work:
 - Better snippets and citations.
 - Better OCR and metadata extraction for screenshots, images, and scanned PDFs.
 - Persistent chat sessions.
-- Local API for UI clients.
 - Additional providers after LM Studio is solid.
 
 The full roadmap lives in [FEATURES.md](FEATURES.md).
