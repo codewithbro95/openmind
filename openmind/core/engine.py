@@ -443,7 +443,7 @@ class OpenMindEngine:
         session: ChatSession | None,
     ) -> tuple[str, list[SearchResult]]:
         self._log("ask.start", "Answering question", question=question, limit=limit)
-        results = self.search(self._conversation_search_query(question, history), limit=limit)
+        results = self.search(question, limit=limit)
         answer = self.answer_provider.answer(
             question,
             results,
@@ -486,7 +486,7 @@ class OpenMindEngine:
             history = session.history
         self._log("ask.start", "Streaming answer", question=question, limit=limit)
         try:
-            results = self.search(self._conversation_search_query(question, history), limit=limit)
+            results = self.search(question, limit=limit)
         except Exception:
             if session is not None:
                 session.lock.release()
@@ -738,22 +738,6 @@ class OpenMindEngine:
 
     def _log(self, event: str, message: str, **fields) -> None:
         append_log(self.paths, event, message, **fields)
-
-    def _conversation_search_query(
-        self,
-        question: str,
-        history: list[dict[str, str]] | None,
-    ) -> str:
-        if not history:
-            return question
-        recent = history[-6:]
-        parts = [
-            f"{item.get('role', 'message')}: {item.get('content', '')[-700:]}"
-            for item in recent
-        ]
-        parts.append(f"user: {question}")
-        return "\n".join(parts)
-
 
 class PathLike:
     @staticmethod

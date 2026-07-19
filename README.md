@@ -245,7 +245,7 @@ Interactive ask commands:
 /quit   leave the chat
 ```
 
-Ask responses use Markdown, and the CLI renders streamed Markdown directly in the terminal. Interactive chat uses the model provider's stateful conversation support, so follow-ups continue from a provider response ID instead of resending the full model conversation. OpenMind keeps only a short local session history to improve retrieval for follow-up questions. Sources appear after CLI answers; API clients receive them separately from generated text. This does not change `openmind search` output.
+Ask responses use Markdown, and the CLI renders streamed Markdown directly in the terminal. Interactive chat uses the model provider's stateful conversation support, so follow-ups continue from a provider response ID instead of resending the full model conversation. OpenMind runs a fresh vector search for every message and sends that turn's retrieved evidence to the model. Sources appear after CLI answers; API clients receive them separately from generated text. This does not change `openmind search` output.
 
 LM Studio provider commands:
 
@@ -896,7 +896,7 @@ The chat and embedding choices are not hard-coded because the right model depend
 
 For the complete experience, download one model for each role before running setup. For text-only search, only an embedding model is required. OCR is separate from these models: OpenMind installs RapidOCR locally for scanned PDFs and visible text in images.
 
-All inference requests are sent to the configured local model server endpoint. OpenMind DOES NOT use the provider's chat interface. The chat model receives the question, retrieved text context, and current interactive-session history; the embedding model receives text; and the image description model receives an image plus the indexing prompt. Raw image bytes are used for that local request but are not stored in LanceDB.
+All inference requests are sent to the configured local model server endpoint. OpenMind DOES NOT use the provider's chat interface. The chat model receives the current question and freshly retrieved text context while the provider maintains the interactive conversation state; the embedding model receives text; and the image description model receives an image plus the indexing prompt. Raw image bytes are used for that local request but are not stored in LanceDB.
 
 Keep docs in sync when behavior changes:
 

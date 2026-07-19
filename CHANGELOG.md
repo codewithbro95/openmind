@@ -13,6 +13,7 @@ User-facing changes for each OpenMind Core release.
 - Updating models now unloads previous OpenMind models(from the model provider) before loading their replacements.
 - Ask responses now format answers, links, and local sources as Markdown.
 - Sessions have been added to the api: Chat now uses faster provider-backed sessions, keeps API sources separate, and lets CLI and API users enable model reasoning when needed while keeping it off by default.
+- Each chat message now retrieves fresh context for its own question, including when the topic changes during a session.
 
 ## 0.0.5 - 2026-07-19
 

@@ -723,9 +723,19 @@ def test_lmstudio_provider_continues_stateful_session_with_response_id():
         score=0.9,
         chunk_index=0,
     )
+    second_result = SearchResult(
+        id="chunk_2",
+        path="/docs/invoice.pdf",
+        file_name="invoice.pdf",
+        title="invoice",
+        text="The invoice total is $125.",
+        snippet="The invoice total is $125.",
+        score=0.95,
+        chunk_index=0,
+    )
 
     provider.answer("Tell me about it", [result], session=session)
-    provider.answer("What about that?", [result], session=session)
+    provider.answer("What is the invoice total?", [second_result], session=session)
 
     assert calls[0][0][2] == provider._system_prompt()
     assert calls[0][1]["previous_response_id"] is None
@@ -734,6 +744,8 @@ def test_lmstudio_provider_continues_stateful_session_with_response_id():
     assert calls[1][1]["previous_response_id"] == "resp_1"
     assert "Tell me about it" not in calls[1][0][1]
     assert "Answer 1" not in calls[1][0][1]
+    assert "The invoice total is $125." in calls[1][0][1]
+    assert "Holiday planning notes" not in calls[1][0][1]
     assert session.provider_state["response_id"] == "resp_2"
 
 

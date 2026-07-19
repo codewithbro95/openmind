@@ -39,6 +39,39 @@ class FakeStreamingAnswerProvider(ContextOnlyAnswerProvider):
         yield "The answer uses retrieved context."
 
 
+class TopicSwitchEngine(OpenMindEngine):
+    def __init__(self, home):
+        super().__init__(
+            paths=AppPaths(
+                home=home,
+                config_path=home / "config.toml",
+                sqlite_path=home / "openmind.sqlite",
+                lancedb_path=home / "lancedb",
+                logs_path=home / "logs",
+            ),
+            embeddings=HashEmbeddingProvider(),
+            answer_provider=FakeStreamingAnswerProvider(),
+        )
+        self.search_queries: list[str] = []
+
+    def search(self, query, limit=5):
+        self.search_queries.append(query)
+        if "invoice" in query.lower():
+            return [
+                SearchResult(
+                    id="chunk_invoice",
+                    path="/docs/invoice.pdf",
+                    file_name="invoice.pdf",
+                    title="Invoice",
+                    text="The invoice total is $125.",
+                    snippet="The invoice total is $125.",
+                    score=0.94,
+                    chunk_index=0,
+                )
+            ]
+        return FakeVectorStore().search([], limit=limit)
+
+
 def test_search_service_returns_ranked_results():
     service = SearchService(HashEmbeddingProvider(), FakeVectorStore())
 
@@ -75,20 +108,26 @@ def test_context_answer_handles_multiple_chunks_from_one_source():
     assert answer.count("Cabin holiday plan includes trail maps and meal prep.") == 2
 
 
-def test_conversation_search_query_includes_recent_history():
-    engine = OpenMindEngine(embeddings=HashEmbeddingProvider())
+def test_each_chat_turn_retrieves_context_for_its_current_question(tmp_path):
+    engine = TopicSwitchEngine(tmp_path)
+    session = engine.create_chat_session()
 
-    query = engine._conversation_search_query(
-        "What about the checklist?",
-        [
-            {"role": "user", "content": "Tell me about holiday planning files."},
-            {"role": "assistant", "content": "I found checklist notes."},
-        ],
+    _, first_sources = engine.ask_with_sources(
+        "What is in the holiday plan?",
+        session=session,
     )
+    second_stream, second_sources = engine.ask_stream_with_sources(
+        "What is the invoice total?",
+        session=session,
+    )
+    list(second_stream)
 
-    assert "holiday planning files" in query
-    assert "checklist notes" in query
-    assert "What about the checklist?" in query
+    assert engine.search_queries == [
+        "What is in the holiday plan?",
+        "What is the invoice total?",
+    ]
+    assert first_sources[0].path == "/docs/holiday.md"
+    assert second_sources[0].path == "/docs/invoice.pdf"
 
 
 def test_ending_chat_session_discards_local_provider_state():
