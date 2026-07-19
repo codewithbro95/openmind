@@ -1,9 +1,6 @@
 from typer.testing import CliRunner
 
-import pytest
-import typer
-
-from openmind.cli.main import _resolve_source_selection, app
+from openmind.cli.main import CUSTOM_FOLDER, _choose_source_paths, app
 from openmind.core.models import FileRecord
 from openmind.storage.sqlite_store import SQLiteStore
 
@@ -42,22 +39,57 @@ def test_source_add_reports_existing_indexed_source(monkeypatch, tmp_path):
     assert "already accessible" in second.output
 
 
-def test_setup_source_selection_accepts_pasted_folder_path(tmp_path):
+def test_setup_source_selection_supports_multiple_folders(monkeypatch, tmp_path):
     docs = tmp_path / "docs"
     data = tmp_path / "data"
     docs.mkdir()
     data.mkdir()
+    monkeypatch.setattr(
+        "openmind.cli.main._checkbox_prompt",
+        lambda message, choices: [str(docs), CUSTOM_FOLDER],
+    )
+    monkeypatch.setattr(
+        "openmind.cli.main._text_prompt",
+        lambda message, default="": str(data),
+    )
 
-    selected = _resolve_source_selection(f"1,{data}", [docs])
+    selected = _choose_source_paths([docs])
 
     assert selected == [docs, data]
 
 
-def test_setup_source_selection_rejects_unknown_text(tmp_path):
+def test_setup_custom_source_does_not_preselect_first_folder(monkeypatch, tmp_path):
+    docs = tmp_path / "docs"
+    custom = tmp_path / "custom"
+    docs.mkdir()
+    custom.mkdir()
+    custom_prompted = []
+
+    def choose_custom(message, choices):
+        assert all(not choice.checked for choice in choices)
+        return [CUSTOM_FOLDER]
+
+    def enter_custom_path(message, default=""):
+        custom_prompted.append(message)
+        return str(custom)
+
+    monkeypatch.setattr("openmind.cli.main._checkbox_prompt", choose_custom)
+    monkeypatch.setattr("openmind.cli.main._text_prompt", enter_custom_path)
+
+    selected = _choose_source_paths([docs])
+
+    assert selected == [custom]
+    assert custom_prompted == ["Custom folder path"]
+
+
+def test_setup_source_selection_uses_checked_folders(monkeypatch, tmp_path):
     docs = tmp_path / "docs"
     docs.mkdir()
+    monkeypatch.setattr(
+        "openmind.cli.main._checkbox_prompt",
+        lambda message, choices: [str(docs)],
+    )
 
-    with pytest.raises(typer.BadParameter) as exc:
-        _resolve_source_selection("not-a-folder", [docs])
+    selected = _choose_source_paths([docs])
 
-    assert "Enter a listed number or an existing folder path" in str(exc.value)
+    assert selected == [docs]

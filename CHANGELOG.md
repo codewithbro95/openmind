@@ -5,6 +5,8 @@ User-facing changes for each OpenMind Core release.
 ## Unreleased
 
 - Added `openmind --version` and clearer command descriptions.
+- Added arrow-key setup menus, checkbox folder selection, and an OpenMind terminal banner.
+- Fixed custom folder selection so standard folders are not selected automatically.
 
 ## 0.0.4 - 2026-07-15
 

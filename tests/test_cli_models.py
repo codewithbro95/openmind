@@ -20,8 +20,21 @@ class FakeResponse:
         return json.dumps(self.payload).encode("utf-8")
 
 
+def mock_prompt_answers(monkeypatch, *answers):
+    selected = iter(answers)
+    monkeypatch.setattr(
+        "openmind.cli.main._select_prompt",
+        lambda *args, **kwargs: next(selected),
+    )
+    monkeypatch.setattr(
+        "openmind.cli.main._text_prompt",
+        lambda message, default="": default,
+    )
+
+
 def test_models_update_saves_selected_lmstudio_models(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENMIND_HOME", str(tmp_path))
+    mock_prompt_answers(monkeypatch, "lmstudio", "gemma", "nomic")
     loaded_models = []
 
     def fake_urlopen(request, timeout):
@@ -58,7 +71,7 @@ def test_models_update_saves_selected_lmstudio_models(monkeypatch, tmp_path):
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
 
-    result = CliRunner().invoke(app, ["models", "update"], input="1\n\n2\n1\n")
+    result = CliRunner().invoke(app, ["models", "update"])
 
     assert result.exit_code == 0
     config = OpenMindConfig.load(tmp_path / "config.toml")
@@ -71,6 +84,7 @@ def test_models_update_saves_selected_lmstudio_models(monkeypatch, tmp_path):
 
 def test_models_update_saves_selected_image_description_model(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENMIND_HOME", str(tmp_path))
+    mock_prompt_answers(monkeypatch, "lmstudio", "qwen", "nomic", "smolvlm")
     loaded_models = []
 
     def fake_urlopen(request, timeout):
@@ -108,7 +122,7 @@ def test_models_update_saves_selected_image_description_model(monkeypatch, tmp_p
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
 
-    result = CliRunner().invoke(app, ["models", "update"], input="1\n\n1\n1\n1\n")
+    result = CliRunner().invoke(app, ["models", "update"])
 
     assert result.exit_code == 0
     config = OpenMindConfig.load(tmp_path / "config.toml")
@@ -121,6 +135,7 @@ def test_models_update_saves_selected_image_description_model(monkeypatch, tmp_p
 
 def test_models_update_can_keep_existing_models_without_loading(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENMIND_HOME", str(tmp_path))
+    mock_prompt_answers(monkeypatch, "lmstudio", "qwen", "nomic")
     OpenMindConfig(
         provider=ProviderSettings(name="lmstudio", base_url="http://localhost:1234"),
         models=ModelSettings(chat_model="qwen", embedding_model="nomic"),
@@ -153,7 +168,6 @@ def test_models_update_can_keep_existing_models_without_loading(monkeypatch, tmp
     result = CliRunner().invoke(
         app,
         ["models", "update", "--no-load"],
-        input="1\n\n\n\n",
     )
 
     assert result.exit_code == 0
@@ -164,6 +178,7 @@ def test_models_update_can_keep_existing_models_without_loading(monkeypatch, tmp
 
 def test_models_update_skips_models_that_are_already_loaded(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENMIND_HOME", str(tmp_path))
+    mock_prompt_answers(monkeypatch, "lmstudio", "qwen", "nomic")
 
     def fake_urlopen(request, timeout):
         if request.full_url.endswith("/api/v1/models"):
@@ -191,7 +206,7 @@ def test_models_update_skips_models_that_are_already_loaded(monkeypatch, tmp_pat
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
 
-    result = CliRunner().invoke(app, ["models", "update"], input="1\n\n1\n1\n")
+    result = CliRunner().invoke(app, ["models", "update"])
 
     assert result.exit_code == 0
     assert "already loaded" in result.output

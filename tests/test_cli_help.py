@@ -1,7 +1,7 @@
 from typer.testing import CliRunner
 
 from openmind import __version__
-from openmind.cli.main import app
+from openmind.cli.main import OPENMIND_BANNER, app
 
 
 def test_version_option_reports_installed_version():
@@ -30,3 +30,11 @@ def test_top_level_help_describes_each_command():
         "Remove OpenMind local data and optionally the package.",
     ):
         assert description in result.output
+
+
+def test_setup_banner_is_large_ascii_art():
+    lines = OPENMIND_BANNER.splitlines()
+
+    assert len(lines) == 6
+    assert max(len(line) for line in lines) >= 45
+    assert OPENMIND_BANNER.isascii()

@@ -7,8 +7,11 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
+import questionary
 import typer
+from questionary import Choice, Style
 from rich.console import Console
 from rich.live import Live
 from rich.progress import Progress
@@ -41,6 +44,30 @@ app.add_typer(models_app, name="models")
 app.add_typer(provider_app, name="provider")
 app.add_typer(dev_app, name="dev")
 console = Console()
+
+OPENMIND_BANNER = r"""
+  ___                   __  __ _           _
+ / _ \ _ __   ___ _ __ |  \/  (_)_ __   __| |
+| | | | '_ \ / _ \ '_ \| |\/| | | '_ \ / _` |
+| |_| | |_) |  __/ | | | |  | | | | | | (_| |
+ \___/| .__/ \___|_| |_|_|  |_|_|_| |_|\__,_|
+      |_|
+""".strip("\n")
+
+PROMPT_STYLE = Style(
+    [
+        ("qmark", "fg:#00d7af bold"),
+        ("question", "bold"),
+        ("answer", "fg:#00d7af bold"),
+        ("pointer", "fg:#00d7af bold"),
+        ("highlighted", "fg:#00d7af bold"),
+        ("selected", "fg:#00d7af"),
+        ("instruction", "fg:#808080"),
+    ]
+)
+
+NO_MODEL = "__openmind_no_model__"
+CUSTOM_FOLDER = "__openmind_custom_folder__"
 
 
 def _version_callback(value: bool) -> None:
@@ -80,6 +107,7 @@ def init_command() -> None:
 def setup_command() -> None:
     current = engine()
     paths = current.init()
+    console.print(f"[bold cyan]{OPENMIND_BANNER}[/bold cyan]")
     console.print("[bold]Welcome to OpenMind.[/bold]")
     console.print("OpenMind creates a private AI memory over your local files.")
     console.print("Checking local environment...")
@@ -87,13 +115,15 @@ def setup_command() -> None:
     console.print("[green]✓[/green] SQLite ready")
     console.print("[green]✓[/green] LanceDB ready")
 
-    console.print("Choose AI provider:")
-    console.print("1. LM Studio")
-    provider_choice = typer.prompt("Selected", default="1")
-    if provider_choice.strip() != "1":
+    provider_choice = _select_prompt(
+        "Choose AI provider",
+        choices=[Choice("LM Studio", value="lmstudio")],
+        default="lmstudio",
+    )
+    if provider_choice != "lmstudio":
         raise typer.BadParameter("Only LM Studio is supported right now.")
 
-    base_url = typer.prompt("LM Studio base URL", default=DEFAULT_LMSTUDIO_BASE_URL)
+    base_url = _text_prompt("LM Studio base URL", default=DEFAULT_LMSTUDIO_BASE_URL)
     config = OpenMindConfig(
         provider=ProviderSettings(name="lmstudio", base_url=base_url, api_token_env="LM_API_TOKEN"),
         models=ModelSettings(chat_model="", embedding_model=""),
@@ -352,10 +382,12 @@ def models_update(
         else ""
     )
 
-    console.print("Choose AI provider:")
-    console.print("1. LM Studio")
-    provider_choice = typer.prompt("Selected", default="1")
-    if provider_choice.strip() != "1":
+    provider_choice = _select_prompt(
+        "Choose AI provider",
+        choices=[Choice("LM Studio", value="lmstudio")],
+        default="lmstudio",
+    )
+    if provider_choice != "lmstudio":
         raise typer.BadParameter("Only LM Studio is supported right now.")
 
     default_base_url = (
@@ -363,7 +395,7 @@ def models_update(
         if config.provider.name == "lmstudio"
         else DEFAULT_LMSTUDIO_BASE_URL
     )
-    base_url = typer.prompt("LM Studio base URL", default=default_base_url)
+    base_url = _text_prompt("LM Studio base URL", default=default_base_url)
     config.provider = ProviderSettings(
         name="lmstudio",
         base_url=base_url,
@@ -751,6 +783,7 @@ def _choose_model(
     title: str,
     models: list[LMStudioModel],
     allow_empty: bool,
+    empty_label: str = "Search-only mode (no chat model)",
 ) -> LMStudioModel | None:
     if not models:
         if allow_empty:
@@ -761,16 +794,13 @@ def _choose_model(
         console.print("Download one manually in LM Studio, then run setup again.")
         raise typer.Exit(1)
 
-    console.print(title + ":")
-    for index, model in enumerate(models, start=1):
-        loaded = " loaded" if model.is_loaded else ""
-        console.print(f"{index}. {model.display_name} ({model.key}){loaded}")
-    choice = typer.prompt("Choose model", default="1")
-    try:
-        selected_index = int(choice) - 1
-        return models[selected_index]
-    except (ValueError, IndexError) as exc:
-        raise typer.BadParameter("Invalid model selection.") from exc
+    choices = [_model_choice(model) for model in models]
+    if allow_empty:
+        choices.append(Choice(empty_label, value=NO_MODEL))
+    selected = _select_prompt(title, choices=choices, default=models[0].key)
+    if selected == NO_MODEL:
+        return None
+    return next(model for model in models if model.key == selected)
 
 
 def _choose_image_model(
@@ -778,7 +808,12 @@ def _choose_image_model(
     chat_models: list[LMStudioModel],
 ) -> LMStudioModel | None:
     if image_models:
-        return _choose_model("Available image description models", image_models, allow_empty=True)
+        return _choose_model(
+            "Choose an image description model",
+            image_models,
+            allow_empty=True,
+            empty_label="Disable image indexing",
+        )
 
     console.print("[yellow]No vision model was detected in LM Studio.[/yellow]")
     console.print(
@@ -789,14 +824,23 @@ def _choose_image_model(
         console.print("Image indexing will be disabled for now.")
         return None
 
-    use_chat_list = typer.confirm(
-        "Choose from available chat models anyway",
-        default=False,
+    action = _select_prompt(
+        "Image indexing",
+        choices=[
+            Choice("Disable image indexing for now", value="disable"),
+            Choice("Choose from available chat models", value="choose"),
+        ],
+        default="disable",
     )
-    if not use_chat_list:
+    if action == "disable":
         console.print("Image indexing will be disabled for now.")
         return None
-    return _choose_model("Available chat models", chat_models, allow_empty=True)
+    return _choose_model(
+        "Choose an image description model",
+        chat_models,
+        allow_empty=True,
+        empty_label="Disable image indexing",
+    )
 
 
 def _choose_model_key(
@@ -820,26 +864,66 @@ def _choose_model_key(
         console.print("Download one manually in LM Studio, then run this command again.")
         raise typer.Exit(1)
 
-    console.print(title + ":")
-    if current_key:
-        console.print(f"Current: {current_key}")
+    choices: list[Choice] = []
+    model_keys = {model.key for model in models}
+    if current_key and current_key not in model_keys:
+        choices.append(Choice(f"Keep current model ({current_key})", value=current_key))
+    choices.extend(_model_choice(model) for model in models)
     if allow_empty:
-        console.print(f"0. {empty_label}")
-    for index, model in enumerate(models, start=1):
-        loaded = " loaded" if model.is_loaded else ""
-        console.print(f"{index}. {model.display_name} ({model.key}){loaded}")
+        choices.append(Choice(empty_label, value=NO_MODEL))
 
-    default = "keep" if current_key else "1"
-    choice = typer.prompt("Choose model", default=default).strip()
-    if current_key and choice.lower() in {"keep", "k"}:
-        return current_key
-    if allow_empty and choice.lower() in {"0", "none", "skip", "search-only"}:
+    default = current_key if current_key in model_keys else models[0].key
+    selected = _select_prompt(title, choices=choices, default=default)
+    if selected == NO_MODEL:
         return ""
-    try:
-        selected_index = int(choice) - 1
-        return models[selected_index].key
-    except (ValueError, IndexError) as exc:
-        raise typer.BadParameter("Invalid model selection.") from exc
+    return str(selected)
+
+
+def _model_choice(model: LMStudioModel) -> Choice:
+    loaded = "  [loaded]" if model.is_loaded else ""
+    return Choice(f"{model.display_name} ({model.key}){loaded}", value=model.key)
+
+
+def _select_prompt(
+    message: str,
+    choices: list[Choice],
+    default: Any = None,
+) -> Any:
+    answer = questionary.select(
+        message,
+        choices=choices,
+        default=default,
+        style=PROMPT_STYLE,
+        instruction="(Use arrow keys and press Enter)",
+        use_indicator=True,
+    ).ask()
+    if answer is None:
+        raise typer.Abort()
+    return answer
+
+
+def _checkbox_prompt(message: str, choices: list[Choice]) -> list[Any]:
+    answer = questionary.checkbox(
+        message,
+        choices=choices,
+        style=PROMPT_STYLE,
+        instruction="(Use arrow keys, Space to select, Enter to continue)",
+        validate=lambda selected: bool(selected) or "Select at least one option.",
+    ).ask()
+    if answer is None:
+        raise typer.Abort()
+    return answer
+
+
+def _text_prompt(message: str, default: str = "") -> str:
+    answer = questionary.text(
+        message,
+        default=default,
+        style=PROMPT_STYLE,
+    ).ask()
+    if answer is None:
+        raise typer.Abort()
+    return answer.strip()
 
 
 def _load_lmstudio_model(client, model_key: str, label: str) -> dict:
@@ -962,15 +1046,7 @@ def _choose_sources(current: OpenMindEngine) -> None:
         Path("~/Desktop").expanduser(),
     ]
     available = [path for path in candidates if path.exists() and path.is_dir()]
-    console.print("Choose folders to index:")
-    for index, path in enumerate(available, start=1):
-        console.print(f"{index}. {path}")
-    console.print(f"{len(available) + 1}. Add custom folder")
-    raw = typer.prompt("Selected numbers or paths, comma separated", default="1")
-    selected_paths = _resolve_source_selection(raw, available)
-    custom_option = len(available) + 1
-    if any(part.strip() == str(custom_option) for part in raw.split(",")):
-        selected_paths.append(Path(typer.prompt("Custom folder")).expanduser())
+    selected_paths = _choose_source_paths(available)
 
     seen_paths: set[Path] = set()
     for path in selected_paths:
@@ -986,30 +1062,23 @@ def _choose_sources(current: OpenMindEngine) -> None:
             _print_existing_source_status(current, str(normalized_path))
 
 
-def _resolve_source_selection(raw: str, available: list[Path]) -> list[Path]:
-    selected_paths: list[Path] = []
-    custom_option = len(available) + 1
-    for part in [value.strip() for value in raw.split(",") if value.strip()]:
-        if part == str(custom_option):
-            continue
-        try:
-            index = int(part)
-        except ValueError:
-            path = Path(part).expanduser()
-            if not path.exists() or not path.is_dir():
-                raise typer.BadParameter(
-                    f"Invalid folder selection: {part}. "
-                    "Enter a listed number or an existing folder path."
-                )
-            selected_paths.append(path)
-            continue
-        if 1 <= index <= len(available):
-            selected_paths.append(available[index - 1])
-            continue
-        raise typer.BadParameter(
-            f"Invalid folder selection: {part}. "
-            "Enter a listed number or an existing folder path."
+def _choose_source_paths(available: list[Path]) -> list[Path]:
+    choices = [Choice(str(path), value=str(path)) for path in available]
+    choices.append(
+        Choice(
+            "Add a custom folder...",
+            value=CUSTOM_FOLDER,
         )
+    )
+    selected = _checkbox_prompt("Choose folders to index", choices)
+    selected_paths = [Path(value) for value in selected if value != CUSTOM_FOLDER]
+
+    if CUSTOM_FOLDER in selected:
+        raw_path = _text_prompt("Custom folder path")
+        custom_path = Path(raw_path).expanduser()
+        if not custom_path.exists() or not custom_path.is_dir():
+            raise typer.BadParameter(f"Folder does not exist or is not a directory: {raw_path}")
+        selected_paths.append(custom_path)
     return selected_paths
 
 

@@ -132,11 +132,13 @@ Setup:
 
 1. Initialize `~/.openmind`.
 2. Check that LM Studio is reachable.
-3. Let you choose LM Studio as the provider.
-4. List available chat, embedding, and image description models.
+3. Let you choose a model provider (currently LM Studio).
+4. Show arrow-key selectors for available chat, embedding, and image description models.
 5. Load the selected models.
-6. Ask which folders to index.
+6. Show a checkbox selector for folders to index.
 7. Start background indexing.
+
+Use the arrow keys to move, `Space` to toggle folders in a checkbox list, and `Enter` to confirm a selection. Setup begins with the OpenMind terminal banner so it is immediately clear which application is running.
 
 Watch indexing progress:
 

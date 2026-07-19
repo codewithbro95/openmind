@@ -36,6 +36,10 @@ Current boundaries:
 - `openmind source list`
 - `openmind source remove <id>`
 - Descriptive top-level help text for every command.
+- Large OpenMind ASCII banner during first-run setup.
+- Arrow-key selection menus for providers and models.
+- Checkbox folder selection with arrow keys and the Space key.
+- Shared interactive prompt styling across setup and model updates.
 
 ### Local Storage
 

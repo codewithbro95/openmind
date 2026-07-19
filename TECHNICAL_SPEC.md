@@ -75,6 +75,7 @@ Runtime:
 
 - `typer`
 - `rich`
+- `questionary`
 - `lancedb`
 - `sentence-transformers`
 - `pydantic`
@@ -257,16 +258,17 @@ openmind uninstall --yes --package
 
 1. Initialize `~/.openmind` if needed.
 2. Check LM Studio at `http://localhost:1234`.
-3. Present provider selection with LM Studio as the only current option.
-4. Fetch `GET /api/v1/models`.
-5. Split models by `type`: `llm` for chat and `embedding` for embeddings.
-6. Ask the user to choose one chat model when available.
-7. Require one embedding model.
-8. Load selected models with `POST /api/v1/models/load`.
-9. Save config to `~/.openmind/config.toml`.
-10. Ask which folders to index.
-11. Start background indexing.
-12. Tell the user to run `openmind index status`.
+3. Display the OpenMind ASCII banner.
+4. Present an arrow-key provider selector with LM Studio as the only current option.
+5. Fetch `GET /api/v1/models`.
+6. Split models by `type`: `llm` for chat and `embedding` for embeddings.
+7. Use arrow-key selectors for chat, embedding, and image-description models.
+8. Require one embedding model.
+9. Load selected models with `POST /api/v1/models/load`.
+10. Save config to `~/.openmind/config.toml`.
+11. Use a checkbox selector for folders, with a custom-folder option.
+12. Start background indexing.
+13. Tell the user to run `openmind index status`.
 
 ## Config Format
 
