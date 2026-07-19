@@ -1,0 +1,210 @@
+# OpenMind Core API
+
+The OpenMind Core API lets local client applications manage sources, control indexing, search local memory, and ask source-grounded questions without knowing about SQLite, LanceDB, extractors, embeddings, or model-provider internals.
+
+The first API contract is available at:
+
+```text
+http://127.0.0.1:8765/api/v1
+```
+
+Interactive OpenAPI documentation is available at `http://127.0.0.1:8765/docs` while the server is running.
+
+## Start the server
+
+Complete `openmind setup` first, then run:
+
+```bash
+openmind serve
+```
+
+The server always binds to `127.0.0.1`. A different port can be selected without exposing the API to the network:
+
+```bash
+openmind serve --port 9000
+```
+
+## Authentication
+
+OpenMind generates a cryptographically random API token at:
+
+```text
+~/.openmind/api_token
+```
+
+The token file is restricted to the current operating-system user on platforms that support POSIX permissions. Show the token with:
+
+```bash
+openmind api token
+```
+
+Send it with every `/api/v1` request:
+
+```http
+Authorization: Bearer <openmind-api-token>
+```
+
+`GET /health` is the only unauthenticated endpoint. It returns only liveness and the OpenMind version.
+
+Rotate a token if it may have been exposed:
+
+```bash
+openmind api token --rotate
+```
+
+Rotation immediately invalidates the previous token. The running API server picks up the new token automatically.
+
+## First request
+
+```bash
+TOKEN="$(openmind api token)"
+
+curl http://127.0.0.1:8765/api/v1/status \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Search local memory:
+
+```bash
+curl http://127.0.0.1:8765/api/v1/search \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"cabin packing list","limit":5}'
+```
+
+## Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Public liveness and version check |
+| `GET` | `/api/v1/status` | OpenMind, model, memory, and indexing status |
+| `GET` | `/api/v1/providers` | Available model providers |
+| `GET` | `/api/v1/providers/status` | Current provider connectivity |
+| `GET` | `/api/v1/models` | Available chat, embedding, and image models |
+| `POST` | `/api/v1/models/load` | Load configured or explicitly selected models |
+| `PUT` | `/api/v1/models/selection` | Save validated model choices and optionally load them |
+| `GET` | `/api/v1/sources` | List user-approved source folders |
+| `POST` | `/api/v1/sources` | Add a source folder |
+| `DELETE` | `/api/v1/sources/{source_id}` | Remove source permission from OpenMind |
+| `POST` | `/api/v1/index/start` | Start or return the active background indexing job |
+| `GET` | `/api/v1/index/status` | Read indexing progress |
+| `POST` | `/api/v1/index/pause` | Request indexing pause |
+| `POST` | `/api/v1/index/resume` | Resume paused indexing |
+| `POST` | `/api/v1/index/stop` | Request indexing stop |
+| `POST` | `/api/v1/search` | Search indexed local memory |
+| `POST` | `/api/v1/ask` | Return an answer with structured sources |
+| `POST` | `/api/v1/ask/stream` | Stream answer text as server-sent events |
+| `GET` | `/api/v1/documents/{file_id}` | Inspect an indexed file and its text chunks |
+| `POST` | `/api/v1/actions/open` | Open a validated indexed file in its default OS app |
+
+## Sources
+
+Add a folder:
+
+```json
+{
+  "path": "/Users/example/Documents",
+  "recursive": true
+}
+```
+
+OpenMind resolves the path and rejects missing files, non-directory paths, and duplicate sources. Removing a source removes OpenMind's permission record; it does not delete the folder or its files.
+
+## Model selection
+
+`GET /api/v1/models` separates chat, embedding, and image-capable models. Save selections with:
+
+```json
+{
+  "chat_model": "qwen-model-key",
+  "embedding_model": "nomic-embedding-key",
+  "image_model": "smolvlm-model-key",
+  "load": true
+}
+```
+
+The API validates every key against models reported by the configured provider. Set `chat_model` to `null` for search-only mode or `image_model` to `null` to disable image indexing. An embedding model is required.
+
+## Search and Ask
+
+Search request:
+
+```json
+{
+  "query": "OAuth error screenshot",
+  "limit": 10
+}
+```
+
+Search results contain a `file_id`, `source_id`, path, score, snippet, source type, chunk index, and safe metadata. They never contain raw vectors or raw image bytes.
+
+Ask request:
+
+```json
+{
+  "question": "Do I have screenshots related to login errors?",
+  "limit": 8,
+  "include_sources": true
+}
+```
+
+The synchronous response contains `answer` and structured `sources`. Use `/api/v1/ask/stream` with the same request body for server-sent events:
+
+```text
+event: delta
+data: {"text":"partial answer"}
+
+event: sources
+data: {"sources":[{"file_id":"file_...","path":"/Users/example/Documents/notes.md"}]}
+
+event: done
+data: {}
+```
+
+## Open indexed files safely
+
+The open action accepts an indexed `file_id`, not an arbitrary path:
+
+```json
+{
+  "file_id": "file_0123456789abcdef"
+}
+```
+
+Before opening anything, OpenMind verifies that the database record is indexed, the file still exists, and its resolved path remains inside an enabled source folder. The API does not expose delete, move, edit, shell-command, or arbitrary-path actions.
+
+## Browser clients and CORS
+
+Cross-origin browser access is disabled by default. Allow only the exact development or application origin that needs access:
+
+```bash
+openmind serve --allow-origin http://localhost:3000
+```
+
+Repeat `--allow-origin` for multiple origins. Wildcards, credentials embedded in origins, paths, query strings, and fragments are rejected. Native desktop, mobile, editor, and command-line clients do not need CORS configuration.
+
+## Error responses
+
+OpenMind uses standard HTTP status codes:
+
+- `400` for an invalid product-level operation.
+- `401` for a missing or invalid bearer token.
+- `403` for a recognized but forbidden local action.
+- `404` when a source, job, document, or indexed file is unavailable.
+- `409` when a source folder is already registered.
+- `422` when a request does not match the documented schema.
+- `503` when the configured model provider cannot complete a request.
+
+Error bodies use FastAPI's standard `detail` field. Client applications should not depend on internal exception text.
+
+## Security boundaries
+
+- The server binds only to `127.0.0.1`; there is no public-host option.
+- Private endpoints require bearer authentication, including on localhost.
+- API tokens are generated locally, stored outside the project, omitted from logs, and compared in constant time.
+- CORS is disabled unless exact origins are explicitly supplied.
+- Request schemas reject unknown fields and bound text and result sizes.
+- Only user-approved source folders can be indexed or opened.
+- The API does not expose SQLite, LanceDB, embeddings, vectors, extractor calls, worker internals, raw file downloads, or raw image bytes.
+
+These boundaries are intentional. Client applications consume OpenMind capabilities while storage and provider implementations remain replaceable.

@@ -1,8 +1,8 @@
-# OpenMind Core 0.0.4 Technical Spec
+# OpenMind Core 0.0.5 Technical Spec
 
 ## Goal
 
-Build a Python CLI tool named `openmind` that creates a local AI memory over user-approved folders.
+Build a Python engine, CLI, and authenticated local API named `openmind` that creates local AI memory over user-approved folders and exposes stable product-level capabilities to client applications.
 
 OpenMind Core must:
 
@@ -17,6 +17,8 @@ OpenMind Core must:
 - Store all app data under `~/.openmind` unless `OPENMIND_HOME` is set.
 - Use LM Studio as the first user-facing model server for chat, embeddings, and image descriptions.
 - Provide first-run setup and background indexing progress.
+- Expose a versioned API on loopback for local client applications.
+- Require bearer authentication for private API operations.
 
 ## Folder Structure
 
@@ -25,6 +27,19 @@ openmind-core/
 ├── openmind/
 │   ├── cli/
 │   │   └── main.py
+│   ├── api/
+│   │   ├── app.py
+│   │   ├── auth.py
+│   │   ├── deps.py
+│   │   ├── files.py
+│   │   ├── schemas.py
+│   │   └── routes/
+│   │       ├── system.py
+│   │       ├── models.py
+│   │       ├── sources.py
+│   │       ├── indexing.py
+│   │       ├── memory.py
+│   │       └── actions.py
 │   ├── core/
 │   │   ├── config.py
 │   │   ├── engine.py
@@ -65,6 +80,7 @@ openmind-core/
 │       └── answer.py
 ├── tests/
 ├── pyproject.toml
+├── API.md
 ├── README.md
 └── TECHNICAL_SPEC.md
 ```
@@ -75,6 +91,9 @@ Runtime:
 
 - `typer`
 - `rich`
+- `questionary`
+- `fastapi`
+- `uvicorn`
 - `lancedb`
 - `sentence-transformers`
 - `pydantic`
@@ -88,6 +107,7 @@ Runtime:
 
 Development:
 
+- `httpx2`
 - `pytest`
 
 Dependency management:
@@ -257,16 +277,17 @@ openmind uninstall --yes --package
 
 1. Initialize `~/.openmind` if needed.
 2. Check LM Studio at `http://localhost:1234`.
-3. Present provider selection with LM Studio as the only current option.
-4. Fetch `GET /api/v1/models`.
-5. Split models by `type`: `llm` for chat and `embedding` for embeddings.
-6. Ask the user to choose one chat model when available.
-7. Require one embedding model.
-8. Load selected models with `POST /api/v1/models/load`.
-9. Save config to `~/.openmind/config.toml`.
-10. Ask which folders to index.
-11. Start background indexing.
-12. Tell the user to run `openmind index status`.
+3. Display the OpenMind ASCII banner.
+4. Present an arrow-key provider selector with LM Studio as the only current option.
+5. Fetch `GET /api/v1/models`.
+6. Split models by `type`: `llm` for chat and `embedding` for embeddings.
+7. Use arrow-key selectors for chat, embedding, and image-description models.
+8. Require one embedding model.
+9. Load selected models with `POST /api/v1/models/load`.
+10. Save config to `~/.openmind/config.toml`.
+11. Use a checkbox selector for folders, with a custom-folder option.
+12. Start background indexing.
+13. Tell the user to run `openmind index status`.
 
 ## Config Format
 
@@ -640,6 +661,55 @@ openmind dev logs --lm-studio
 
 `--lm-studio` runs `lms log stream`, matching LM Studio's own development guidance for inspecting model input.
 
+## Local API
+
+`openmind serve` starts a single-process FastAPI application at `127.0.0.1:8765`. The CLI does not expose a host option; remote network binding is outside the `0.0.5` security model.
+
+The public liveness route is:
+
+```text
+GET /health
+```
+
+All product routes are versioned under `/api/v1` and require:
+
+```http
+Authorization: Bearer <token>
+```
+
+The API token is generated with Python's `secrets` module, stored at `~/.openmind/api_token`, restricted to mode `0600` on POSIX platforms, and compared with `secrets.compare_digest`. The server reads the current token for authenticated requests so rotation takes effect without a restart. Token values must not be written to OpenMind or Uvicorn access logs.
+
+Protected capabilities:
+
+- system and indexing status
+- provider status and model discovery
+- validated model selection and loading
+- source listing, addition, and removal
+- background indexing start, pause, resume, status, and stop
+- search with structured source records
+- synchronous and server-sent-event Ask, including structured source events
+- indexed file and chunk details
+- opening an indexed file in its default operating-system application
+
+The open-file action accepts only a generated file ID. Before launching an OS application, OpenMind must verify that the file record is indexed, the file still exists, and its fully resolved path remains beneath an enabled source directory.
+
+API schemas reject unknown request fields. Queries, questions, paths, model-key lists, result limits, and file IDs are bounded and validated. Browser CORS is disabled by default. `--allow-origin` accepts exact HTTP or HTTPS origins and refuses wildcard, credential-bearing, path-bearing, query-bearing, or fragment-bearing values.
+
+The API must not expose:
+
+- API token values in responses other than the explicit CLI token command
+- arbitrary local paths for open or read actions
+- raw files or raw image bytes
+- embedding vectors
+- raw SQLite or LanceDB operations
+- manual chunk insertion
+- manual embedding or extractor operations
+- shell command execution
+
+FastAPI lifespan initializes one shared `OpenMindEngine` before requests are accepted. Route handlers call engine capabilities rather than reaching around the engine into database implementation details, except read-only indexed document lookup needed to expose sanitized chunk text.
+
+The client contract and examples are documented in [API.md](API.md).
+
 ## Acceptance Tests
 
 The first acceptable build must prove:
@@ -658,3 +728,11 @@ The first acceptable build must prove:
 - Config can save and load selected provider/model settings.
 - SQLite can create and update indexing job status.
 - LM Studio ask returns a clear message when the server is unreachable.
+- Public health works without a token while all `/api/v1` routes reject missing or invalid tokens.
+- The OpenAPI schema declares bearer security for private routes.
+- API token files use private permissions and can be rotated.
+- The server CLI always binds Uvicorn to `127.0.0.1`.
+- Wildcard CORS and malformed request bodies are rejected.
+- Search, Ask, streaming Ask, source management, model selection, and indexing controls work through the API.
+- Document lookup omits vectors.
+- Open-file actions reject files outside enabled source folders.

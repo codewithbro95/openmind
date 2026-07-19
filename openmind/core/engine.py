@@ -73,9 +73,9 @@ class OpenMindEngine:
         self.answer_provider = self._build_answer_provider()
         self.extractors = self._build_extractor_registry()
 
-    def add_source(self, path: str) -> Source:
+    def add_source(self, path: str, recursive: bool = True) -> Source:
         self.init()
-        return self.sources.add(path)
+        return self.sources.add(path, recursive=recursive)
 
     def list_sources(self) -> list[Source]:
         self.init()
@@ -296,6 +296,21 @@ class OpenMindEngine:
         show_thinking: bool = False,
         history: list[dict[str, str]] | None = None,
     ) -> str:
+        answer, _ = self.ask_with_sources(
+            question,
+            limit=limit,
+            show_thinking=show_thinking,
+            history=history,
+        )
+        return answer
+
+    def ask_with_sources(
+        self,
+        question: str,
+        limit: int = 5,
+        show_thinking: bool = False,
+        history: list[dict[str, str]] | None = None,
+    ) -> tuple[str, list[SearchResult]]:
         self._log("ask.start", "Answering question", question=question, limit=limit)
         results = self.search(self._conversation_search_query(question, history), limit=limit)
         answer = self.answer_provider.answer(
@@ -305,7 +320,7 @@ class OpenMindEngine:
             history=history,
         )
         self._log("ask.finish", "Answer finished", question=question, sources=len(results))
-        return answer
+        return answer, results
 
     def ask_stream(
         self,
@@ -314,18 +329,42 @@ class OpenMindEngine:
         show_thinking: bool = False,
         history: list[dict[str, str]] | None = None,
     ) -> Iterator[str]:
-        self._log("ask.start", "Streaming answer", question=question, limit=limit)
-        results = self.search(self._conversation_search_query(question, history), limit=limit)
-        if results:
-            yield _retrieval_preamble(results)
-        for chunk in self.answer_provider.stream_answer(
+        stream, _ = self.ask_stream_with_sources(
             question,
-            results,
+            limit=limit,
             show_thinking=show_thinking,
             history=history,
-        ):
-            yield chunk
-        self._log("ask.finish", "Streaming answer finished", question=question, sources=len(results))
+        )
+        yield from stream
+
+    def ask_stream_with_sources(
+        self,
+        question: str,
+        limit: int = 5,
+        show_thinking: bool = False,
+        history: list[dict[str, str]] | None = None,
+    ) -> tuple[Iterator[str], list[SearchResult]]:
+        self._log("ask.start", "Streaming answer", question=question, limit=limit)
+        results = self.search(self._conversation_search_query(question, history), limit=limit)
+
+        def stream() -> Iterator[str]:
+            if results:
+                yield _retrieval_preamble(results)
+            for chunk in self.answer_provider.stream_answer(
+                question,
+                results,
+                show_thinking=show_thinking,
+                history=history,
+            ):
+                yield chunk
+            self._log(
+                "ask.finish",
+                "Streaming answer finished",
+                question=question,
+                sources=len(results),
+            )
+
+        return stream(), results
 
     def status(self) -> StatusSummary:
         self.init()

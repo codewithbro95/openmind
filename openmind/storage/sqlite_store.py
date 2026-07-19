@@ -151,6 +151,13 @@ class SQLiteStore:
             return None
         return self._file_from_row(row)
 
+    def file_by_id(self, file_id: str) -> FileRecord | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM files WHERE id = ?", (file_id,)).fetchone()
+        if row is None:
+            return None
+        return self._file_from_row(row)
+
     def upsert_file(self, record: FileRecord) -> None:
         with self.connect() as conn:
             conn.execute(

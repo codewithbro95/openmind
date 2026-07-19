@@ -25,6 +25,7 @@ Current boundaries:
 
 ### Core CLI
 
+- `openmind --version` and `openmind -V`
 - `openmind init`
 - `openmind setup`
 - `openmind status`
@@ -34,6 +35,11 @@ Current boundaries:
 - `openmind source add <path>`
 - `openmind source list`
 - `openmind source remove <id>`
+- Descriptive top-level help text for every command.
+- Large OpenMind ASCII banner during first-run setup.
+- Arrow-key selection menus for providers and models.
+- Checkbox folder selection with arrow keys and the Space key.
+- Shared interactive prompt styling across setup and model updates.
 
 ### Local Storage
 
@@ -114,7 +120,7 @@ Image files are indexed by generating text descriptions through a local vision m
 
 ### LM Studio Provider
 
-- LM Studio is the only user-facing `0.0.4` provider.
+- LM Studio is the only user-facing `0.0.5` provider.
 - Native LM Studio REST model listing:
   - `GET /api/v1/models`
 - Native LM Studio model loading:
@@ -218,6 +224,28 @@ Image files are indexed by generating text descriptions through a local vision m
 - LM Studio log mode runs:
   - `lms log stream`
 
+### Local API
+
+- `openmind serve` starts the API on `127.0.0.1:8765`.
+- Versioned client contract under `/api/v1`.
+- Public `GET /health` liveness endpoint.
+- Bearer authentication for every private endpoint.
+- Random local API token stored with private file permissions.
+- `openmind api token` shows the client token.
+- `openmind api token --rotate` invalidates the existing token.
+- Status and model-provider inspection.
+- Model listing, validated selection, and loading.
+- Source listing, creation, and removal.
+- Start, status, pause, resume, and stop indexing operations.
+- Search responses with paths, snippets, scores, metadata, and stable file IDs.
+- Source-grounded synchronous Ask responses.
+- Server-sent-event streaming for Ask.
+- Indexed document and chunk inspection without vectors.
+- Safe open-file action restricted to indexed files inside enabled sources.
+- Interactive OpenAPI documentation.
+- Explicit browser origins through repeatable `--allow-origin`; wildcard CORS is refused.
+- No raw SQLite, LanceDB, embedding, vector, extractor, or arbitrary-path endpoints.
+
 ### Test Data
 
 - `data/` folder with local indexing fixtures.
@@ -239,6 +267,7 @@ Image files are indexed by generating text descriptions through a local vision m
 - No source enable/disable command yet.
 - No command to clear or rebuild LanceDB tables yet.
 - No explicit failed-file retry command yet.
+- API access is intentionally local-only; remote binding is not supported.
 
 ## Roadmap
 
@@ -254,7 +283,7 @@ Image files are indexed by generating text descriptions through a local vision m
 - Add faster cancellation checks around embedding batches.
 - Add clearer model-loaded status.
 
-### 0.0.5 Retrieval Quality
+### 0.0.6 Retrieval Quality
 
 - Hybrid search: vector plus keyword/BM25.
 - Better snippets around matched content.
@@ -264,7 +293,7 @@ Image files are indexed by generating text descriptions through a local vision m
 - Better PDF page metadata.
 - Better CSV/table summaries.
 
-### 0.0.6 Local Memory Quality
+### 0.0.7 Local Memory Quality
 
 - Persistent conversation sessions.
 - Session list/resume/delete commands.
@@ -273,7 +302,7 @@ Image files are indexed by generating text descriptions through a local vision m
 - Answer confidence and missing-evidence notices.
 - Per-source indexing policies.
 
-### 0.0.7 File Coverage
+### 0.0.8 File Coverage
 
 - OCR for screenshots and image files.
 - Advanced OCR backend option such as PaddleOCR.
@@ -282,12 +311,11 @@ Image files are indexed by generating text descriptions through a local vision m
 - Email export ingestion.
 - More document formats.
 
-### 0.0.8 Local Service
+### 0.0.9 Local Service Extensions
 
-- FastAPI local API.
-- Local web UI or desktop UI can connect to the same engine.
 - Background worker process management.
 - File watcher for incremental indexing.
+- Optional event stream for indexing progress.
 
 ### Future Providers
 

@@ -69,6 +69,9 @@ class SearchResult(BaseModel):
     score: float
     chunk_index: int
     metadata: dict[str, Any] = Field(default_factory=dict)
+    file_id: str = ""
+    source_id: str = ""
+    extension: str = ""
 
 
 class IndexSummary(BaseModel):
