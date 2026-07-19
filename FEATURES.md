@@ -176,7 +176,7 @@ Image files are indexed by generating text descriptions through a local vision m
 
 - Bare `openmind ask` opens an interactive chat session.
 - Uses the provider's stateful chat continuation ID instead of resending full model history.
-- Keeps a short session history in OpenMind only for follow-up retrieval.
+- Runs fresh vector retrieval for every chat message, even when the topic changes within a session.
 - API requests return an opaque session ID that clients can reuse or explicitly end.
 - Session history is discarded when the process exits.
 - Commands inside chat:

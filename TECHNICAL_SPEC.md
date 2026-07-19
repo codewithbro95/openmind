@@ -555,7 +555,7 @@ Interactive ask:
 
 - `openmind ask` with no question starts an interactive chat session.
 - Session history is held in memory only.
-- Follow-up retrieval uses the current user question plus recent session history.
+- Every chat turn retrieves context using the current user question before calling the model.
 - The LLM receives recent user/assistant messages plus fresh local file context for the current turn.
 - `/clear` resets session history.
 - `/exit` and `/quit` close the session.
@@ -602,7 +602,7 @@ Search requires an embedding provider. Normal setup uses LM Studio embeddings.
 6. Keep generated answer text separate from structured retrieval sources.
 7. Append deduplicated `file://` source links only in the CLI presentation layer.
 
-Interactive CLI and API chat use LM Studio's native stateful `POST /api/v1/chat` endpoint. The first turn stores the provider conversation and captures its `response_id`; follow-ups send only the current question, current retrieved evidence, and `previous_response_id`. OpenMind retains a bounded local history only to improve retrieval queries. One-shot CLI Ask remains stateless.
+Interactive CLI and API chat use LM Studio's native stateful `POST /api/v1/chat` endpoint. The first turn stores the provider conversation and captures its `response_id`; follow-ups run a fresh vector search, then send the current question, that turn's retrieved evidence, and `previous_response_id`. One-shot CLI Ask remains stateless.
 
 The synchronous API identifies Ask output with `format = "markdown"`, returns an opaque OpenMind `session_id`, and accepts that ID on follow-ups. The streaming API emits the session ID and Markdown format in its initial `meta` event. `reasoning` defaults to false and controls whether model reasoning is generated and returned. Sources remain available only through the structured `sources` field or SSE event, not appended to generated API text. Search output is unchanged.
 
