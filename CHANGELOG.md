@@ -6,7 +6,6 @@ User-facing changes for each OpenMind Core release.
 
 - Each chat message now retrieves fresh context for its own question, including when the topic changes during a session.
 
-
 ## 0.0.6 - 2026-07-19
 
 - Removing a source now removes its indexed memory without deleting the original files.
