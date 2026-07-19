@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -123,12 +124,31 @@ class OpenMindConfig(BaseModel):
     def load(cls, path: Path) -> "OpenMindConfig":
         if not path.exists():
             return cls()
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        return cls.from_toml(path.read_text(encoding="utf-8"))
+
+    @classmethod
+    def from_toml(cls, text: str) -> "OpenMindConfig":
+        data = tomllib.loads(text)
         return cls(**data)
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(self.to_toml(), encoding="utf-8")
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=path.parent,
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary.write(self.to_toml())
+                temporary_path = Path(temporary.name)
+            temporary_path.replace(path)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
     def to_toml(self) -> str:
         return (

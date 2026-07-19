@@ -119,6 +119,79 @@ def test_lmstudio_load_model_if_needed_skips_loaded_model(monkeypatch):
     assert requested_urls == ["http://localhost:1234/api/v1/models"]
 
 
+def test_lmstudio_unloads_every_loaded_instance_for_selected_models(monkeypatch):
+    unloaded_instances = []
+
+    def fake_urlopen(request, timeout):
+        if request.full_url.endswith("/api/v1/models"):
+            return FakeResponse(
+                {
+                    "models": [
+                        {
+                            "type": "llm",
+                            "key": "qwen-old",
+                            "display_name": "Qwen Old",
+                            "loaded_instances": [
+                                {"id": "qwen-old:1", "config": {}},
+                                {"id": "qwen-old:2", "config": {}},
+                            ],
+                        },
+                        {
+                            "type": "llm",
+                            "key": "unrelated",
+                            "display_name": "Unrelated",
+                            "loaded_instances": [{"id": "unrelated:1", "config": {}}],
+                        },
+                    ]
+                }
+            )
+        if request.full_url.endswith("/api/v1/models/unload"):
+            body = json.loads(request.data.decode("utf-8"))
+            unloaded_instances.append(body["instance_id"])
+            return FakeResponse({"status": "unloaded"})
+        raise AssertionError(f"Unexpected URL: {request.full_url}")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    results = LMStudioClient().unload_models_if_loaded({"qwen-old"})
+
+    assert unloaded_instances == ["qwen-old:1", "qwen-old:2"]
+    assert results == [
+        {
+            "model": "qwen-old",
+            "status": "unloaded",
+            "skipped": False,
+            "instance_ids": ["qwen-old:1", "qwen-old:2"],
+        }
+    ]
+
+
+def test_lmstudio_skips_unload_when_model_is_not_loaded(monkeypatch):
+    def fake_urlopen(request, timeout):
+        assert request.full_url.endswith("/api/v1/models")
+        return FakeResponse(
+            {
+                "models": [
+                    {
+                        "type": "llm",
+                        "key": "qwen-old",
+                        "display_name": "Qwen Old",
+                        "loaded_instances": [],
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    results = LMStudioClient().unload_models_if_loaded({"qwen-old", "missing"})
+
+    assert results == [
+        {"model": "missing", "status": "not_available", "skipped": True},
+        {"model": "qwen-old", "status": "already_unloaded", "skipped": True},
+    ]
+
+
 def test_lmstudio_client_reports_unreachable(monkeypatch):
     def fake_urlopen(request, timeout):
         raise urllib.error.URLError("connection refused")

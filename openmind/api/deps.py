@@ -8,7 +8,9 @@ from openmind.core.engine import OpenMindEngine
 
 
 def get_engine(request: Request) -> OpenMindEngine:
-    return request.app.state.engine
+    engine = request.app.state.engine
+    engine.reload_config_if_changed()
+    return engine
 
 
 EngineDependency = Annotated[OpenMindEngine, Depends(get_engine)]

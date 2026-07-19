@@ -271,6 +271,18 @@ openmind uninstall
 openmind uninstall --yes --package
 ```
 
+## Source Removal Flow
+
+`openmind source remove <id>` removes OpenMind's access to a source and unindexes its memory. It never modifies or deletes the original folder.
+
+1. Refuse removal while a background indexing job is unfinished.
+2. Mark the source disabled so concurrent foreground indexing cannot commit new records.
+3. Delete every LanceDB chunk with the source ID.
+4. Delete the source's SQLite file records and source record in one SQLite transaction.
+5. Report the file-record and chunk counts removed.
+
+File indexing verifies that its source is still enabled when committing its SQLite record. If a source was disabled concurrently, any chunks produced by that indexing operation are deleted. During initialization, OpenMind also removes orphan file records and chunks left by source removals performed by older versions.
+
 ## Setup Flow
 
 `openmind setup` must:
@@ -522,8 +534,12 @@ Multimodal image descriptions also use `POST /v1/chat/completions`, with image b
 5. Let the user choose a chat model, or search-only mode.
 6. Require one embedding model.
 7. Let the user choose an image description model or disable image indexing.
-8. Save the selected keys to `~/.openmind/config.toml`.
-9. Load the selected models unless `--no-load` is passed.
+8. Unless `--no-load` is passed, compute the previous OpenMind model keys that are absent from the new selection.
+9. Resolve those models' loaded instance IDs with `GET /api/v1/models` and unload each instance with `POST /api/v1/models/unload`.
+10. Save the selected keys to `~/.openmind/config.toml`.
+11. Load the selected models unless `--no-load` is passed.
+
+Only models from OpenMind's previous configuration are eligible for automatic unloading. Unchanged selections and unrelated models loaded directly in LM Studio are not unloaded. When `--no-load` is used, OpenMind updates configuration without changing model-server memory.
 
 `openmind ask` streams by default:
 
@@ -710,6 +726,10 @@ FastAPI lifespan initializes one shared `OpenMindEngine` before requests are acc
 
 The client contract and examples are documented in [API.md](API.md).
 
+### Runtime Configuration Synchronization
+
+The API keeps one shared engine instance, but the CLI can update `config.toml` from another process. Configuration saves use an atomic same-directory file replacement. Before each authenticated API request, the engine fingerprints the complete config snapshot and reloads only when it changed. Reloading rebuilds the chat, embedding, image-description, extractor, and provider clients together so status and inference use one consistent configuration.
+
 ## Acceptance Tests
 
 The first acceptable build must prove:
@@ -717,6 +737,9 @@ The first acceptable build must prove:
 - `openmind init` creates app data directories and SQLite tables.
 - `openmind source add <path>` records a user-approved source.
 - `openmind source list` shows recorded sources.
+- Removing a source deletes only its SQLite records and LanceDB chunks while preserving user files.
+- Source removal cannot race an unfinished background indexing job.
+- Initialization cleans indexed data orphaned by legacy source removal behavior.
 - Scanner finds supported files and ignores noisy folders.
 - Extractors turn supported test files into text.
 - Image extractor stores generated descriptions/OCR text, not raw image bytes.

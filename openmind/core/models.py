@@ -13,6 +13,18 @@ class Source(BaseModel):
     created_at: str
 
 
+class SourceRemovalResult(BaseModel):
+    source_id: str
+    source_path: str
+    files_removed: int
+    chunks_removed: int
+
+
+class ModelTransitionResult(BaseModel):
+    unload_results: list[dict[str, Any]] = Field(default_factory=list)
+    load_results: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class FileRecord(BaseModel):
     id: str
     source_id: str

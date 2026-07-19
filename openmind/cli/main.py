@@ -28,6 +28,7 @@ from openmind.core.config import (
     ProviderSettings,
 )
 from openmind.core.engine import OpenMindEngine
+from openmind.core.errors import SourceRemovalBlockedError
 from openmind.core.models import IndexJob, IndexSummary
 from openmind.providers.lmstudio.errors import LMStudioConnectionError, LMStudioError
 from openmind.providers.lmstudio.models import LMStudioModel, split_models, vision_models
@@ -207,12 +208,22 @@ def source_list() -> None:
     _print_sources(engine().list_sources())
 
 
-@source_app.command("remove")
+@source_app.command(
+    "remove",
+    help="Remove a source and its indexed memory without deleting user files.",
+)
 def source_remove(source_id: str) -> None:
-    removed = engine().remove_source(source_id)
-    if not removed:
+    try:
+        result = engine().remove_source(source_id)
+    except SourceRemovalBlockedError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if result is None:
         raise typer.BadParameter(f"Unknown source id: {source_id}")
-    console.print(f"[green]Removed source[/green] {source_id}")
+    console.print(f"[green]Removed source[/green] {result.source_id}")
+    console.print(f"File records removed: {result.files_removed}")
+    console.print(f"Memory chunks removed: {result.chunks_removed}")
+    console.print(f"Original folder and files were not deleted: {result.source_path}")
 
 
 @index_app.callback(invoke_without_command=True)
@@ -372,7 +383,7 @@ def models_update(
 ) -> None:
     current = engine()
     current.init()
-    config = current.config
+    config = current.config.model_copy(deep=True)
     current_provider_name = config.provider.name
     current_chat_model = config.models.chat_model if current_provider_name == "lmstudio" else ""
     current_embedding_model = (
@@ -403,11 +414,9 @@ def models_update(
         base_url=base_url,
         api_token_env=config.provider.api_token_env or "LM_API_TOKEN",
     )
-    current.save_config(config)
-
     console.print(f"Fetching LM Studio models from {base_url}...")
     try:
-        models = current.list_lmstudio_models()
+        models = current.lmstudio_client(config).list_models()
     except LMStudioConnectionError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
@@ -441,30 +450,27 @@ def models_update(
     config.models.embedding_model = embedding_model_key
     config.extraction.images.enabled = bool(image_model_key)
     config.extraction.images.model = image_model_key or DEFAULT_IMAGE_DESCRIPTION_MODEL
-    current.save_config(config)
-    console.print("[green]Saved model configuration.[/green]")
+    try:
+        transition = current.update_model_config(config, load=load)
+    except LMStudioError as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        if current.config == config:
+            console.print("The new selection was saved. Retry loading with: openmind models load")
+        else:
+            console.print("The model update was not completed. Check LM Studio and try again.")
+        return
 
+    console.print("[green]Saved model configuration.[/green]")
     if not load:
         console.print("Run `openmind models load` when you are ready to load the selected models.")
         return
 
-    console.print("Loading selected models...")
-    try:
-        client = current.lmstudio_client()
-        results = []
-        if chat_model_key:
-            results.append(_load_lmstudio_model(client, chat_model_key, "Chat model"))
-        else:
-            console.print("[yellow]Search-only mode enabled because no chat model was selected.[/yellow]")
-        results.append(_load_lmstudio_model(client, embedding_model_key, "Embedding model"))
-        if image_model_key:
-            results.append(_load_lmstudio_model(client, image_model_key, "Image description model"))
-        else:
-            console.print("[yellow]Image indexing disabled.[/yellow]")
-        _print_model_load_summary(results)
-    except LMStudioError as exc:
-        console.print(f"[yellow]{exc}[/yellow]")
-        console.print("You can retry loading models with: openmind models load")
+    _print_model_unload_summary(transition.unload_results)
+    if not chat_model_key:
+        console.print("[yellow]Search-only mode enabled because no chat model was selected.[/yellow]")
+    if not image_model_key:
+        console.print("[yellow]Image indexing disabled.[/yellow]")
+    _print_model_load_summary(transition.load_results)
 
 
 @provider_app.command("status")
@@ -1019,6 +1025,15 @@ def _print_model_load_summary(results: list[dict]) -> None:
         f"[green]Configured models ready[/green] "
         f"({loaded_count} loaded, {skipped_count} already loaded)"
     )
+
+
+def _print_model_unload_summary(results: list[dict]) -> None:
+    for result in results:
+        model_key = result.get("model", "")
+        if result.get("skipped"):
+            console.print(f"[dim]Previous model was not loaded: {model_key}[/dim]")
+        else:
+            console.print(f"[green]✓[/green] Previous model unloaded: {model_key}")
 
 
 def _print_existing_source_status(current: OpenMindEngine, path: str) -> None:

@@ -72,17 +72,14 @@ def select_models(
     config.extraction.images.enabled = request.image_model is not None
     if request.image_model:
         config.extraction.images.model = request.image_model
-    engine.save_config(config)
-
-    load_results: list[dict] = []
-    if request.load:
-        load_results = engine.load_configured_models()
+    transition = engine.update_model_config(config, load=request.load)
     return ModelSelectionResponse(
         provider="lmstudio",
         chat_model=request.chat_model,
         embedding_model=request.embedding_model,
         image_model=request.image_model,
-        load_results=[_load_result(result) for result in load_results],
+        unload_results=[_load_result(result) for result in transition.unload_results],
+        load_results=[_load_result(result) for result in transition.load_results],
     )
 
 

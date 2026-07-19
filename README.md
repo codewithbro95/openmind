@@ -199,6 +199,8 @@ openmind source list
 openmind source remove <source_id>
 ```
 
+Removing a source also removes its file records, chunks, and embeddings from OpenMind. The original folder and files are never deleted.
+
 If a folder was already added, OpenMind tells you it is already registered and reports indexed files that are already accessible.
 
 Indexing:
@@ -337,7 +339,7 @@ Change saved models with:
 openmind models update
 ```
 
-The command fetches the latest LM Studio model list, lets you choose chat, embedding, and image description models, saves the new config, and loads the selected models by default.
+The command fetches the latest LM Studio model list and lets you choose chat, embedding, and image description models. By default, OpenMind unloads its previous models that are no longer selected, saves the new config, and loads the new selections. Models loaded independently in LM Studio are left alone.
 
 When loading or updating models, OpenMind checks LM Studio first and skips models that are already loaded.
 

@@ -55,6 +55,9 @@ Current boundaries:
 
 ### Source Management
 
+- Removing a source also removes its SQLite file records and LanceDB memory chunks.
+- Original source folders and files are never deleted.
+- Indexed data left by sources removed with older versions is cleaned up automatically.
 - User-approved folders only.
 - Re-adding an existing source reports that it is already registered.
 - Recursive folder scanning.
@@ -144,6 +147,8 @@ Image files are indexed by generating text descriptions through a local vision m
 - Interactive model re-selection from the latest LM Studio model list.
 - Saves separate chat, embedding, and image description model choices.
 - Can load newly selected models immediately or save only with `--no-load`.
+- Unloads previous OpenMind model selections that are no longer used before loading replacements.
+- Leaves unrelated models loaded independently in LM Studio untouched.
 - Skips model loading when LM Studio reports the model is already loaded.
 
 ### Search
@@ -233,6 +238,7 @@ Image files are indexed by generating text descriptions through a local vision m
 - Random local API token stored with private file permissions.
 - `openmind api token` shows the client token.
 - `openmind api token --rotate` invalidates the existing token.
+- Running API clients automatically see provider and model changes saved by the CLI.
 - Status and model-provider inspection.
 - Model listing, validated selection, and loading.
 - Source listing, creation, and removal.

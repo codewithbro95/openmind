@@ -50,6 +50,7 @@ def test_config_save_and_load_round_trip(tmp_path):
     assert loaded.extraction.images.prompt == "Describe this image."
     assert loaded.extraction.images.ocr_enabled is False
     assert loaded.extraction.images.max_new_tokens == 123
+    assert list(tmp_path.glob(".config.toml.*.tmp")) == []
 
 
 def test_default_config_uses_python_installed_ocr_backend():

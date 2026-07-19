@@ -60,6 +60,46 @@ class LMStudioClient:
             payload["context_length"] = context_length
         return self._request("POST", "/api/v1/models/load", payload)
 
+    def unload_model_instance(self, instance_id: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/v1/models/unload",
+            {"instance_id": instance_id},
+        )
+
+    def unload_models_if_loaded(self, model_keys: set[str]) -> list[dict[str, Any]]:
+        if not model_keys:
+            return []
+
+        models = {model.key: model for model in self.list_models()}
+        results: list[dict[str, Any]] = []
+        for model_key in sorted(model_keys):
+            model = models.get(model_key)
+            if model is None:
+                results.append(
+                    {"model": model_key, "status": "not_available", "skipped": True}
+                )
+                continue
+
+            instance_ids = [instance.id for instance in model.loaded_instances]
+            if not instance_ids:
+                results.append(
+                    {"model": model_key, "status": "already_unloaded", "skipped": True}
+                )
+                continue
+
+            for instance_id in instance_ids:
+                self.unload_model_instance(instance_id)
+            results.append(
+                {
+                    "model": model_key,
+                    "status": "unloaded",
+                    "skipped": False,
+                    "instance_ids": instance_ids,
+                }
+            )
+        return results
+
     def load_model_if_needed(
         self,
         model_key: str,

@@ -90,6 +90,7 @@ class ModelSelectionResponse(ApiSchema):
     chat_model: str | None
     embedding_model: str
     image_model: str | None
+    unload_results: list[ModelLoadResult]
     load_results: list[ModelLoadResult]
 
 
@@ -111,6 +112,14 @@ class SourceResponse(ApiSchema):
 
 class SourceListResponse(ApiSchema):
     sources: list[SourceResponse]
+
+
+class SourceRemovalResponse(ApiSchema):
+    source_id: str
+    source_path: str
+    files_removed: int
+    chunks_removed: int
+    user_files_deleted: bool = False
 
 
 class IndexJobResponse(ApiSchema):

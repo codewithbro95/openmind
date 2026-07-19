@@ -13,7 +13,16 @@ from openmind.api.app import create_app
 from openmind.api.auth import ensure_api_token, rotate_api_token, token_path
 from openmind.cli.main import app as cli_app
 from openmind.core.config import AppPaths, ModelSettings, OpenMindConfig, ProviderSettings
-from openmind.core.models import FileRecord, IndexJob, SearchResult, Source, StatusSummary
+from openmind.core.engine import OpenMindEngine
+from openmind.core.errors import SourceRemovalBlockedError
+from openmind.core.models import (
+    FileRecord,
+    IndexJob,
+    SearchResult,
+    Source,
+    SourceRemovalResult,
+    StatusSummary,
+)
 from openmind.providers.lmstudio.models import LMStudioModel
 
 TOKEN = "test-token-abcdefghijklmnopqrstuvwxyz-123456"
@@ -92,6 +101,9 @@ class FakeEngine:
         self.paths.ensure()
         return self.paths
 
+    def reload_config_if_changed(self):
+        return False
+
     def status(self):
         return StatusSummary(
             sources=1,
@@ -134,6 +146,19 @@ class FakeEngine:
             keys.append(self.config.extraction.images.model)
         return [self._load_model(key) for key in keys]
 
+    def update_model_config(self, config, *, load=True):
+        from openmind.core.models import ModelTransitionResult
+
+        self.save_config(config)
+        return ModelTransitionResult(
+            unload_results=(
+                [{"model": "qwen-old", "status": "unloaded", "skipped": False}]
+                if load
+                else []
+            ),
+            load_results=self.load_configured_models() if load else [],
+        )
+
     def save_config(self, config):
         self.config = config
 
@@ -150,7 +175,14 @@ class FakeEngine:
         )
 
     def remove_source(self, source_id):
-        return source_id == self.source.id
+        if source_id != self.source.id:
+            return None
+        return SourceRemovalResult(
+            source_id=self.source.id,
+            source_path=self.source.path,
+            files_removed=1,
+            chunks_removed=3,
+        )
 
     def start_index_job(self):
         self.job = IndexJob(id="job_123", status="pending")
@@ -218,6 +250,50 @@ def test_health_is_public_but_private_routes_require_token(tmp_path):
     assert valid.json()["indexed_chunks"] == 3
 
 
+def test_running_api_refreshes_all_models_after_external_config_update(tmp_path):
+    paths = AppPaths(
+        home=tmp_path / ".openmind",
+        config_path=tmp_path / ".openmind" / "config.toml",
+        sqlite_path=tmp_path / ".openmind" / "openmind.sqlite",
+        lancedb_path=tmp_path / ".openmind" / "lancedb",
+        logs_path=tmp_path / ".openmind" / "logs",
+    )
+    initial = OpenMindConfig(
+        provider=ProviderSettings(name="lmstudio", base_url="http://localhost:1234"),
+        models=ModelSettings(chat_model="chat-old", embedding_model="embed-old"),
+    )
+    initial.extraction.images.model = "image-old"
+    initial.save(paths.config_path)
+    engine = OpenMindEngine(paths=paths)
+    app = create_app(engine=engine, api_token=TOKEN)
+
+    with TestClient(app) as client:
+        before = client.get(f"{API}/status", headers=auth_headers())
+
+        updated = initial.model_copy(deep=True)
+        updated.provider.base_url = "http://localhost:2234"
+        updated.models.chat_model = "chat-new"
+        updated.models.embedding_model = "embed-new"
+        updated.extraction.images.model = "image-new"
+        updated.save(paths.config_path)
+
+        after = client.get(f"{API}/status", headers=auth_headers())
+
+    assert before.json()["chat_model"] == "chat-old"
+    assert before.json()["embedding_model"] == "embed-old"
+    assert before.json()["image_model"] == "image-old"
+    assert after.json()["chat_model"] == "chat-new"
+    assert after.json()["embedding_model"] == "embed-new"
+    assert after.json()["image_model"] == "image-new"
+    assert engine.answer_provider.model == "chat-new"
+    assert engine.answer_provider.client.base_url == "http://localhost:2234"
+    assert engine.embeddings.model == "embed-new"
+    assert engine.embeddings.client.base_url == "http://localhost:2234"
+    image_extractor = engine.extractors.for_path("example.png")
+    assert image_extractor.description_provider.model_name == "image-new"
+    assert image_extractor.description_provider.client.base_url == "http://localhost:2234"
+
+
 def test_openapi_marks_private_routes_as_bearer_authenticated(tmp_path):
     app = create_app(engine=FakeEngine(tmp_path), api_token=TOKEN)
     with TestClient(app) as client:
@@ -253,16 +329,69 @@ def test_models_sources_and_index_controls(tmp_path):
         paused = client.post(f"{API}/index/pause", headers=auth_headers())
         resumed = client.post(f"{API}/index/resume", headers=auth_headers())
         stopped = client.post(f"{API}/index/stop", headers=auth_headers())
+        removed = client.delete(f"{API}/sources/{SOURCE_ID}", headers=auth_headers())
 
     assert models.status_code == 200
     assert models.json()["image_models"][0]["key"] == "smolvlm"
     assert selection.status_code == 200
+    assert selection.json()["unload_results"] == []
+    assert selection.json()["load_results"] == []
     assert source.status_code == 201
     assert source.json()["recursive"] is False
     assert started.status_code == 202
     assert paused.json()["state"] == "pause_requested"
     assert resumed.json()["state"] == "running"
     assert stopped.json()["state"] == "stop_requested"
+    assert removed.status_code == 200
+    assert removed.json() == {
+        "source_id": SOURCE_ID,
+        "source_path": engine.source.path,
+        "files_removed": 1,
+        "chunks_removed": 3,
+        "user_files_deleted": False,
+    }
+
+
+def test_model_selection_api_reports_unload_and_load_results(tmp_path):
+    engine = FakeEngine(tmp_path)
+    app = create_app(engine=engine, api_token=TOKEN)
+
+    with TestClient(app) as client:
+        response = client.put(
+            f"{API}/models/selection",
+            headers=auth_headers(),
+            json={
+                "chat_model": "qwen",
+                "embedding_model": "nomic",
+                "image_model": None,
+                "load": True,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["unload_results"] == [
+        {"model": "qwen-old", "status": "unloaded", "skipped": False}
+    ]
+    assert [result["model"] for result in response.json()["load_results"]] == [
+        "qwen",
+        "nomic",
+    ]
+
+
+def test_source_removal_returns_conflict_during_indexing(tmp_path):
+    engine = FakeEngine(tmp_path)
+
+    def blocked(source_id):
+        raise SourceRemovalBlockedError("Stop indexing before removing this source.")
+
+    engine.remove_source = blocked
+    app = create_app(engine=engine, api_token=TOKEN)
+
+    with TestClient(app) as client:
+        response = client.delete(f"{API}/sources/{SOURCE_ID}", headers=auth_headers())
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Stop indexing before removing this source."
 
 
 def test_search_ask_stream_document_and_safe_open(tmp_path):

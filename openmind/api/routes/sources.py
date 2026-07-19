@@ -5,7 +5,13 @@ import sqlite3
 from fastapi import APIRouter, HTTPException, status
 
 from openmind.api.deps import EngineDependency
-from openmind.api.schemas import SourceCreateRequest, SourceListResponse, SourceResponse
+from openmind.api.schemas import (
+    SourceCreateRequest,
+    SourceListResponse,
+    SourceRemovalResponse,
+    SourceResponse,
+)
+from openmind.core.errors import SourceRemovalBlockedError
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
@@ -31,9 +37,19 @@ def add_source(request: SourceCreateRequest, engine: EngineDependency) -> Source
     return SourceResponse(**source.model_dump())
 
 
-@router.delete("/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_source(source_id: str, engine: EngineDependency) -> None:
+@router.delete("/{source_id}", response_model=SourceRemovalResponse)
+def remove_source(source_id: str, engine: EngineDependency) -> SourceRemovalResponse:
     if not source_id.startswith("src_") or len(source_id) > 64:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found.")
-    if not engine.remove_source(source_id):
+    try:
+        result = engine.remove_source(source_id)
+    except SourceRemovalBlockedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found.")
+    return SourceRemovalResponse(
+        source_id=result.source_id,
+        source_path=result.source_path,
+        files_removed=result.files_removed,
+        chunks_removed=result.chunks_removed,
+    )

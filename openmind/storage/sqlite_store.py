@@ -121,16 +121,28 @@ class SQLiteStore:
         query += " ORDER BY created_at ASC"
         with self.connect() as conn:
             rows = conn.execute(query, params).fetchall()
-        return [
-            Source(
-                id=row["id"],
-                path=row["path"],
-                recursive=bool(row["recursive"]),
-                enabled=bool(row["enabled"]),
-                created_at=row["created_at"],
+        return [self._source_from_row(row) for row in rows]
+
+    def source_by_id(self, source_id: str) -> Source | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone()
+        return self._source_from_row(row) if row is not None else None
+
+    def set_source_enabled(self, source_id: str, enabled: bool) -> bool:
+        with self.connect() as conn:
+            result = conn.execute(
+                "UPDATE sources SET enabled = ? WHERE id = ?",
+                (int(enabled), source_id),
             )
-            for row in rows
-        ]
+            return result.rowcount > 0
+
+    def source_is_enabled(self, source_id: str) -> bool:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT enabled FROM sources WHERE id = ?",
+                (source_id,),
+            ).fetchone()
+        return row is not None and bool(row["enabled"])
 
     def indexed_file_count_for_source(self, source_id: str) -> int:
         with self.connect() as conn:
@@ -139,10 +151,36 @@ class SQLiteStore:
                 (source_id,),
             ).fetchone()[0]
 
-    def remove_source(self, source_id: str) -> bool:
+    def remove_source(self, source_id: str) -> int | None:
         with self.connect() as conn:
-            cur = conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
-            return cur.rowcount > 0
+            source = conn.execute("SELECT 1 FROM sources WHERE id = ?", (source_id,)).fetchone()
+            if source is None:
+                return None
+            files_removed = conn.execute(
+                "DELETE FROM files WHERE source_id = ?",
+                (source_id,),
+            ).rowcount
+            conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
+            return files_removed
+
+    def orphaned_source_ids(self) -> list[str]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT files.source_id
+                FROM files
+                LEFT JOIN sources ON sources.id = files.source_id
+                WHERE sources.id IS NULL
+                """
+            ).fetchall()
+        return [str(row["source_id"]) for row in rows]
+
+    def delete_files_for_source(self, source_id: str) -> int:
+        with self.connect() as conn:
+            return conn.execute(
+                "DELETE FROM files WHERE source_id = ?",
+                (source_id,),
+            ).rowcount
 
     def file_by_path(self, path: str) -> FileRecord | None:
         with self.connect() as conn:
@@ -160,38 +198,19 @@ class SQLiteStore:
 
     def upsert_file(self, record: FileRecord) -> None:
         with self.connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO files (
-                  id, source_id, path, name, extension, size, modified_at,
-                  content_hash, status, indexed_at, error
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(path) DO UPDATE SET
-                  source_id = excluded.source_id,
-                  name = excluded.name,
-                  extension = excluded.extension,
-                  size = excluded.size,
-                  modified_at = excluded.modified_at,
-                  content_hash = excluded.content_hash,
-                  status = excluded.status,
-                  indexed_at = excluded.indexed_at,
-                  error = excluded.error
-                """,
-                (
-                    record.id,
-                    record.source_id,
-                    record.path,
-                    record.name,
-                    record.extension,
-                    record.size,
-                    record.modified_at,
-                    record.content_hash,
-                    record.status,
-                    record.indexed_at,
-                    record.error,
-                ),
-            )
+            self._upsert_file(conn, record)
+
+    def upsert_file_if_source_enabled(self, record: FileRecord) -> bool:
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            source = conn.execute(
+                "SELECT enabled FROM sources WHERE id = ?",
+                (record.source_id,),
+            ).fetchone()
+            if source is None or not bool(source["enabled"]):
+                return False
+            self._upsert_file(conn, record)
+            return True
 
     def status(self, app_home: str) -> StatusSummary:
         with self.connect() as conn:
@@ -297,6 +316,20 @@ class SQLiteStore:
             return None
         return self._job_from_row(row)
 
+    def latest_unfinished_index_job(self) -> IndexJob | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM index_jobs
+                WHERE status NOT IN ('completed', 'failed', 'stopped')
+                ORDER BY updated_at DESC, started_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        if row is None:
+            return None
+        return self._job_from_row(row)
+
     def _file_from_row(self, row: sqlite3.Row) -> FileRecord:
         return FileRecord(
             id=row["id"],
@@ -310,6 +343,49 @@ class SQLiteStore:
             status=row["status"],
             indexed_at=row["indexed_at"],
             error=row["error"],
+        )
+
+    def _upsert_file(self, conn: sqlite3.Connection, record: FileRecord) -> None:
+        conn.execute(
+            """
+            INSERT INTO files (
+              id, source_id, path, name, extension, size, modified_at,
+              content_hash, status, indexed_at, error
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(path) DO UPDATE SET
+              source_id = excluded.source_id,
+              name = excluded.name,
+              extension = excluded.extension,
+              size = excluded.size,
+              modified_at = excluded.modified_at,
+              content_hash = excluded.content_hash,
+              status = excluded.status,
+              indexed_at = excluded.indexed_at,
+              error = excluded.error
+            """,
+            (
+                record.id,
+                record.source_id,
+                record.path,
+                record.name,
+                record.extension,
+                record.size,
+                record.modified_at,
+                record.content_hash,
+                record.status,
+                record.indexed_at,
+                record.error,
+            ),
+        )
+
+    def _source_from_row(self, row: sqlite3.Row) -> Source:
+        return Source(
+            id=row["id"],
+            path=row["path"],
+            recursive=bool(row["recursive"]),
+            enabled=bool(row["enabled"]),
+            created_at=row["created_at"],
         )
 
     def _job_values(self, job: IndexJob) -> tuple[object, ...]:
