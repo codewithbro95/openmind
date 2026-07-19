@@ -1,6 +1,6 @@
 # OpenMind Features and Roadmap
 
-This is the living feature ledger for OpenMind Core. Every new feature should be added here when it lands, and roadmap items should move into shipped sections as they are implemented.
+This is the living feature ledger for OpenMind Core. Every new feature should be added here when it lands, and roadmap items should move into implemented sections as they are completed.
 
 ## Product Principle
 
@@ -21,7 +21,7 @@ Current boundaries:
 - No deleting, moving, or modifying user files.
 - No plugin marketplace.
 
-## Shipped Features
+## Implemented Features
 
 ### Core CLI
 
@@ -123,7 +123,7 @@ Image files are indexed by generating text descriptions through a local vision m
 
 ### LM Studio Provider
 
-- LM Studio is the only user-facing `0.0.6` provider.
+- LM Studio is currently the only user-facing provider.
 - Native LM Studio REST model listing:
   - `GET /api/v1/models`
 - Native LM Studio model loading:
@@ -292,7 +292,7 @@ Image files are indexed by generating text descriptions through a local vision m
 - Add faster cancellation checks around embedding batches.
 - Add clearer model-loaded status.
 
-### 0.0.6 Retrieval Quality
+### Retrieval Quality
 
 - Hybrid search: vector plus keyword/BM25.
 - Better snippets around matched content.
@@ -302,7 +302,7 @@ Image files are indexed by generating text descriptions through a local vision m
 - Better PDF page metadata.
 - Better CSV/table summaries.
 
-### 0.0.7 Local Memory Quality
+### Local Memory Quality
 
 - Persistent conversation sessions.
 - Session list/resume/delete commands.
@@ -311,7 +311,7 @@ Image files are indexed by generating text descriptions through a local vision m
 - Answer confidence and missing-evidence notices.
 - Per-source indexing policies.
 
-### 0.0.8 File Coverage
+### File Coverage
 
 - OCR for screenshots and image files.
 - Advanced OCR backend option such as PaddleOCR.
@@ -320,7 +320,7 @@ Image files are indexed by generating text descriptions through a local vision m
 - Email export ingestion.
 - More document formats.
 
-### 0.0.9 Local Service Extensions
+### Local Service Extensions
 
 - Background worker process management.
 - File watcher for incremental indexing.
