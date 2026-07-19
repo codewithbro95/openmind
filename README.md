@@ -16,6 +16,11 @@ OpenMind is a local AI memory engine for your computer.
 
 It indexes folders you explicitly approve, stores searchable memory locally, and lets you search or ask questions across your own files with sources attached.
 
+> [!IMPORTANT]
+> **Official client app:** [Beignet Haricot](https://github.com/codewithbro95/beignet-haricot) is the official work-in-progress client app. It is developed separately and uses OpenMind as its local memory engine.
+>
+> **Build your own client:** As of [OpenMind v0.0.5](https://github.com/codewithbro95/openmind/releases/tag/v0.0.5), the core CLI capabilities are exposed over an authenticated local API. local client apps can build directly on OpenMind using the documented [API](API.md).
+
 OpenMind is not a chatbot, desktop UI, browser extension, cloud sync service, or agent that controls your machine. It focuses on three core jobs:
 
 ```text
