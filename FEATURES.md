@@ -61,17 +61,26 @@ Current boundaries:
 - User-approved folders only.
 - Re-adding an existing source reports that it is already registered.
 - Recursive folder scanning.
-- Ignores noisy folders:
-  - `.git`
-  - `node_modules`
-  - `venv`
-  - `.venv`
-  - `.env`
-  - `__pycache__`
-  - `dist`
-  - `build`
-  - `.cache`
-  - hidden folders
+
+### Ignore Rules
+
+- First-class SQLite-backed rules shared by indexing and Watch Mode.
+- CLI and authenticated API management use the same engine methods.
+- Global and source-specific scopes.
+- Rule types:
+  - exact path
+  - folder name
+  - file name
+  - extension
+  - glob pattern
+  - source type
+  - maximum file size
+  - hidden files and folders
+- Explainable path testing reports the matching rule and reason.
+- Protected system rules cover dependencies, generated output, caches, temporary downloads, local databases, environment files, and private keys.
+- System rules are visible and cannot be disabled or removed.
+- Adding or enabling a rule immediately removes matching searchable chunks while preserving original files.
+- Disabling or removing a user rule makes matching files eligible for the next index run.
 
 ### File Support
 
@@ -82,7 +91,6 @@ Supported indexed formats:
 - `.pdf`
 - `.docx`
 - `.csv`
-- `.html`
 - `.png`
 - `.jpg`
 - `.jpeg`
@@ -91,7 +99,9 @@ Supported indexed formats:
 - `.tif`
 - `.tiff`
 
-OpenMind is document-first by default. Source code, JSON config, package metadata, app asset catalogs, and other low-level project internals are not indexed unless a future opt-in mode is added.
+OpenMind is document-first. Source code, HTML, JSON config, package metadata, app asset catalogs, and other low-level project internals are not supported indexed formats. Markdown remains the supported format for high-level project documentation.
+
+OpenMind removes stale indexed memory for unsupported formats during startup without deleting or modifying the original files.
 
 Image files are indexed by generating text descriptions through a local vision model endpoint and embedding that text like any other document chunk.
 
@@ -103,7 +113,6 @@ Image files are indexed by generating text descriptions through a local vision m
 - Automatic scanned-PDF OCR fallback with local RapidOCR + ONNX Runtime.
 - DOCX extraction with `python-docx`.
 - CSV extraction with `pandas`.
-- HTML extraction with BeautifulSoup.
 - Image description extraction through a local LM Studio vision model.
 - Optional image OCR text extraction with RapidOCR.
 - Searchable image metadata extraction for dimensions, format, EXIF, and safe image info fields.
@@ -218,6 +227,23 @@ Image files are indexed by generating text descriptions through a local vision m
 - Pause/stop take effect after the current file finishes.
 - Progress is capped at `100.0%`.
 
+### Watch Mode
+
+- `openmind watch`
+- `openmind watch status`
+- `openmind watch stop`
+- Runs as a detached local worker until explicitly stopped.
+- CLI and API controls share the same worker lifecycle and SQLite state.
+- Watches enabled, user-approved source folders only.
+- Runs a lightweight catch-up scan before listening for live changes.
+- Uses the cross-platform watchdog backend.
+- Debounces repeated filesystem events and waits for files to stabilize.
+- Queues create, re-index, and delete work in SQLite.
+- Treats a move as deletion of the old path followed by indexing the new path.
+- Removes deleted-file metadata from SQLite and chunks from LanceDB.
+- Records per-file failures and continues processing later changes.
+- Exposes authenticated start, status, and stop controls through the local API.
+
 ### Developer Logs
 
 - Structured OpenMind logs:
@@ -228,6 +254,7 @@ Image files are indexed by generating text descriptions through a local vision m
   - `openmind dev logs`
   - `openmind dev logs --no-follow --lines 40`
   - `openmind dev logs --log all`
+  - `openmind dev logs --log watch`
   - `openmind dev logs --lm-studio`
 - LM Studio log mode runs:
   - `lms log stream`
@@ -245,6 +272,7 @@ Image files are indexed by generating text descriptions through a local vision m
 - Status and model-provider inspection.
 - Model listing, validated selection, and loading.
 - Source listing, creation, and removal.
+- Ignore-rule listing, creation, update, removal, and path testing.
 - Start, status, pause, resume, and stop indexing operations.
 - Search responses with paths, snippets, scores, metadata, and stable file IDs.
 - Source-grounded synchronous Ask responses.
@@ -258,8 +286,7 @@ Image files are indexed by generating text descriptions through a local vision m
 ### Test Data
 
 - `data/` folder with local indexing fixtures.
-- Includes text, Markdown, JSON, CSV, HTML, JavaScript, PDF, PNG, and JPEG samples.
-- Supported document-first formats, PDFs, PNGs, and JPEGs can be indexed.
+- Includes supported document and image samples plus source/config fixtures that verify excluded formats stay unindexed.
 
 ## Known Limits
 
@@ -267,7 +294,7 @@ Image files are indexed by generating text descriptions through a local vision m
 - Image indexing requires a local vision model served through LM Studio.
 - Default scanned-PDF OCR can be installed through `uv`; optional OCRmyPDF mode still needs local OCRmyPDF, Tesseract, and Ghostscript.
 - No persistent chat history yet.
-- No file watcher yet.
+- Watch mode survives terminal closure but must be restarted after a machine reboot or process termination.
 - No ranking tuning beyond vector search.
 - No hybrid keyword/vector search yet.
 - No UI.
@@ -323,7 +350,6 @@ Image files are indexed by generating text descriptions through a local vision m
 ### Local Service Extensions
 
 - Background worker process management.
-- File watcher for incremental indexing.
 - Optional event stream for indexing progress.
 
 ### Future Providers

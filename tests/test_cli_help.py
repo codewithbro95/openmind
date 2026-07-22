@@ -28,6 +28,7 @@ def test_top_level_help_describes_each_command():
         "Show OpenMind storage and indexing information.",
         "Clear indexed memory without deleting user files.",
         "Remove OpenMind local data and optionally the package.",
+        "Keep indexed memory synchronized with source folders.",
     ):
         assert description in result.output
 

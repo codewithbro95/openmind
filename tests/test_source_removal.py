@@ -57,6 +57,19 @@ def test_remove_source_is_blocked_during_active_indexing(tmp_path):
     assert engine.sources.get(source.id) is not None
 
 
+def test_remove_source_is_blocked_while_watch_mode_is_active(tmp_path):
+    engine = _engine(tmp_path)
+    source_dir = tmp_path / "docs"
+    source_dir.mkdir()
+    source = engine.add_source(str(source_dir))
+    engine.sqlite.update_watch_state(status="running", pid=1234)
+
+    with pytest.raises(SourceRemovalBlockedError, match="openmind watch stop"):
+        engine.remove_source(source.id)
+
+    assert engine.sources.get(source.id) is not None
+
+
 def test_init_cleans_memory_left_by_legacy_source_removal(tmp_path):
     engine = _engine(tmp_path)
     source_dir = tmp_path / "legacy"

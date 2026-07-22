@@ -25,6 +25,7 @@ from openmind.core.models import (
 )
 from openmind.llm.session import ChatSession
 from openmind.providers.lmstudio.models import LMStudioModel
+from openmind.watcher.state import WatchStatus
 
 TOKEN = "test-token-abcdefghijklmnopqrstuvwxyz-123456"
 FILE_ID = "file_0123456789abcdef"
@@ -99,6 +100,7 @@ class FakeEngine:
         self.loaded = []
         self.chat_sessions = {}
         self.ask_calls = []
+        self.watch = WatchStatus(state="stopped")
 
     def init(self):
         self.paths.ensure()
@@ -118,6 +120,21 @@ class FakeEngine:
 
     def index_job_status(self):
         return self.job
+
+    def watch_status(self):
+        return self.watch
+
+    def start_watch(self):
+        self.watch = WatchStatus(
+            state="running",
+            sources=[self.source.path],
+            pid=1234,
+        )
+        return self.watch
+
+    def stop_watch(self):
+        self.watch = self.watch.model_copy(update={"state": "stop_requested"})
+        return self.watch
 
     def provider_status(self):
         return True, "LM Studio is reachable."
@@ -265,6 +282,21 @@ def test_health_is_public_but_private_routes_require_token(tmp_path):
     assert invalid.headers["www-authenticate"] == "Bearer"
     assert valid.status_code == 200
     assert valid.json()["indexed_chunks"] == 3
+    assert valid.json()["watcher_state"] == "stopped"
+
+
+def test_watch_api_starts_reports_and_stops_the_watcher(tmp_path):
+    app = create_app(engine=FakeEngine(tmp_path), api_token=TOKEN)
+
+    with TestClient(app) as client:
+        started = client.post(f"{API}/watch/start", headers=auth_headers())
+        current = client.get(f"{API}/watch/status", headers=auth_headers())
+        stopped = client.post(f"{API}/watch/stop", headers=auth_headers())
+
+    assert started.status_code == 202
+    assert started.json()["state"] == "running"
+    assert current.json()["sources"] == [str(tmp_path / "documents")]
+    assert stopped.json()["state"] == "stop_requested"
 
 
 def test_running_api_refreshes_all_models_after_external_config_update(tmp_path):

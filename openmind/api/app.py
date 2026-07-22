@@ -12,7 +12,16 @@ from openmind import __version__
 from openmind.api.auth import ensure_api_token, require_api_token
 from openmind.api.cors import validate_cors_origin
 from openmind.api.files import open_local_file
-from openmind.api.routes import actions, indexing, memory, models, sources, system
+from openmind.api.routes import (
+    actions,
+    ignore_rules,
+    indexing,
+    memory,
+    models,
+    sources,
+    system,
+    watching,
+)
 from openmind.core.engine import OpenMindEngine
 from openmind.providers.lmstudio.errors import LMStudioError
 
@@ -58,7 +67,9 @@ def create_app(
     app.include_router(system.router, prefix=API_PREFIX, dependencies=protected)
     app.include_router(models.router, prefix=API_PREFIX, dependencies=protected)
     app.include_router(sources.router, prefix=API_PREFIX, dependencies=protected)
+    app.include_router(ignore_rules.router, prefix=API_PREFIX, dependencies=protected)
     app.include_router(indexing.router, prefix=API_PREFIX, dependencies=protected)
+    app.include_router(watching.router, prefix=API_PREFIX, dependencies=protected)
     app.include_router(memory.router, prefix=API_PREFIX, dependencies=protected)
     app.include_router(actions.router, prefix=API_PREFIX, dependencies=protected)
 

@@ -32,9 +32,13 @@ from openmind.core.config import (
 from openmind.core.engine import OpenMindEngine
 from openmind.core.errors import SourceRemovalBlockedError
 from openmind.core.models import IndexJob, IndexSummary, SearchResult
+from openmind.ignore.errors import IgnoreRuleError
+from openmind.ignore.models import IgnoreRule
 from openmind.providers.lmstudio.errors import LMStudioConnectionError, LMStudioError
 from openmind.providers.lmstudio.models import LMStudioModel, split_models, vision_models
 from openmind.retrieval.context import format_sources
+from openmind.watcher.errors import WatchError
+from openmind.watcher.state import WatchStatus
 
 app = typer.Typer(help="OpenMind local AI memory engine.")
 source_app = typer.Typer(help="Manage user-approved folders.")
@@ -43,12 +47,18 @@ models_app = typer.Typer(help="Manage LM Studio models.")
 provider_app = typer.Typer(help="Inspect provider status.")
 dev_app = typer.Typer(help="Developer tools.")
 api_app = typer.Typer(help="Manage local API access.")
+watch_app = typer.Typer(help="Keep indexed memory synchronized with source folders.")
+ignore_app = typer.Typer(help="Manage programmable indexing exclusions.")
+ignore_add_app = typer.Typer(help="Add an ignore rule.")
 app.add_typer(source_app, name="source")
 app.add_typer(index_app, name="index")
 app.add_typer(models_app, name="models")
 app.add_typer(provider_app, name="provider")
 app.add_typer(dev_app, name="dev")
 app.add_typer(api_app, name="api")
+app.add_typer(watch_app, name="watch")
+app.add_typer(ignore_app, name="ignore")
+ignore_app.add_typer(ignore_add_app, name="add")
 console = Console()
 
 OPENMIND_BANNER = r"""
@@ -229,6 +239,173 @@ def source_remove(source_id: str) -> None:
     console.print(f"Original folder and files were not deleted: {result.source_path}")
 
 
+@ignore_app.command("list", help="List protected and user-created ignore rules.")
+def ignore_list() -> None:
+    _print_ignore_rules(engine().list_ignore_rules())
+
+
+def _add_ignore_rule(
+    rule_type: str,
+    value: str,
+    options: tuple[str, str | None, str | None, bool],
+) -> None:
+    scope, source_id, reason, enabled = options
+    try:
+        rule = engine().add_ignore_rule(
+            rule_type,
+            value,
+            enabled=enabled,
+            scope=scope,
+            source_id=source_id,
+            reason=reason,
+        )
+    except IgnoreRuleError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]Added ignore rule[/green] {rule.id}: {rule.type} {rule.value}")
+    if rule.enabled:
+        console.print("Matching indexed content is no longer searchable.")
+
+
+@ignore_add_app.command("path", help="Ignore a file or folder path.")
+def ignore_add_path(
+    path: str,
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("path", path, (scope, source_id, reason, enabled))
+
+
+@ignore_add_app.command("pattern", help="Ignore matching file names or relative paths.")
+def ignore_add_pattern(
+    pattern: str,
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("pattern", pattern, (scope, source_id, reason, enabled))
+
+
+@ignore_add_app.command("extension", help="Ignore a file extension such as .mp4.")
+def ignore_add_extension(
+    extension: str,
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("extension", extension, (scope, source_id, reason, enabled))
+
+
+@ignore_add_app.command("folder-name", help="Ignore folders with this exact name.")
+def ignore_add_folder_name(
+    name: str,
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("folder_name", name, (scope, source_id, reason, enabled))
+
+
+@ignore_add_app.command("file-name", help="Ignore files with this exact name.")
+def ignore_add_file_name(
+    name: str,
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("file_name", name, (scope, source_id, reason, enabled))
+
+
+@ignore_add_app.command(
+    "source-type",
+    help="Ignore a predefined category: image, document, text, markdown, pdf, word, or csv.",
+)
+def ignore_add_source_type(
+    source_type: str,
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("source_type", source_type, (scope, source_id, reason, enabled))
+
+
+@ignore_add_app.command("max-file-size", help="Ignore files larger than a size such as 100MB.")
+def ignore_add_max_file_size(
+    size: str,
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("max_file_size", size, (scope, source_id, reason, enabled))
+
+
+@ignore_add_app.command("hidden-files", help="Ignore hidden files and folders.")
+def ignore_add_hidden_files(
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("hidden_files", "true", (scope, source_id, reason, enabled))
+
+
+@ignore_app.command("remove", help="Remove a user-created ignore rule.")
+def ignore_remove(rule_id: str) -> None:
+    try:
+        rule = engine().remove_ignore_rule(rule_id)
+    except IgnoreRuleError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]Removed ignore rule[/green] {rule.id}")
+    console.print("Run `openmind index` to include files that are no longer ignored.")
+
+
+def _set_ignore_rule_enabled(rule_id: str, enabled: bool) -> None:
+    try:
+        rule = engine().update_ignore_rule(rule_id, enabled=enabled)
+    except IgnoreRuleError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    state = "enabled" if rule.enabled else "disabled"
+    console.print(f"[green]Ignore rule {state}[/green] {rule.id}")
+    if not enabled:
+        console.print("Run `openmind index` to include files that are no longer ignored.")
+
+
+@ignore_app.command("enable", help="Enable a user-created ignore rule.")
+def ignore_enable(rule_id: str) -> None:
+    _set_ignore_rule_enabled(rule_id, True)
+
+
+@ignore_app.command("disable", help="Disable a user-created ignore rule.")
+def ignore_disable(rule_id: str) -> None:
+    _set_ignore_rule_enabled(rule_id, False)
+
+
+@ignore_app.command("test", help="Explain whether a path is ignored.")
+def ignore_test(
+    path: str,
+    source_id: str | None = typer.Option(None, "--source", help="Optional source id."),
+) -> None:
+    decision = engine().test_ignore_path(path, source_id=source_id)
+    if not decision.ignored:
+        console.print("[green]Allowed[/green] This path is eligible for indexing.")
+        return
+    console.print("[yellow]Ignored[/yellow]")
+    console.print(f"Rule: {decision.rule_id}")
+    console.print(f"Type: {decision.rule_type}")
+    console.print(f"Value: {decision.rule_value}")
+    console.print(f"Reason: {decision.reason}")
+
+
 @index_app.callback(invoke_without_command=True)
 def index_command(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is not None:
@@ -350,6 +527,45 @@ def index_stop() -> None:
 def index_worker(job_id: str = typer.Option(..., "--job-id")) -> None:
     final_job = engine().run_index_worker(job_id)
     console.print(f"Index worker finished with status: {final_job.status}")
+
+
+@watch_app.callback(invoke_without_command=True)
+def watch_command(ctx: typer.Context) -> None:
+    """Start background synchronization for enabled source folders."""
+    if ctx.invoked_subcommand is not None:
+        return
+    try:
+        status = engine().start_watch()
+    except WatchError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if status.state == "error":
+        message = status.errors[0] if status.errors else "Watch mode could not be started."
+        console.print(f"[red]{message}[/red]")
+        raise typer.Exit(1)
+    console.print("[green]Watch mode is running in the background.[/green]")
+    console.print(f"Process id: {status.pid or 'starting'}")
+    console.print("Run `openmind watch status` to inspect activity.")
+    console.print("Run `openmind watch stop` to stop watching.")
+
+
+@watch_app.command("status", help="Show watch state and queued file changes.")
+def watch_status_command() -> None:
+    console.print(_watch_status_table(engine().watch_status()))
+
+
+@watch_app.command("stop", help="Stop the running watch process.")
+def watch_stop_command() -> None:
+    status = engine().stop_watch()
+    if status.state == "stop_requested":
+        console.print("Watch mode stop requested.")
+    else:
+        console.print(f"Watch mode status: {status.state}")
+
+
+@watch_app.command("worker", hidden=True)
+def watch_worker_command() -> None:
+    engine().run_watch()
 
 
 @models_app.command("list")
@@ -554,7 +770,7 @@ def dev_logs(
     log: str = typer.Option(
         "openmind",
         "--log",
-        help="Which OpenMind log to show: openmind, index, or all.",
+        help="Which OpenMind log to show: openmind, index, watch, or all.",
     ),
     lm_studio: bool = typer.Option(
         False,
@@ -567,12 +783,13 @@ def dev_logs(
         return
 
     current = engine()
-    current.init()
+    current.paths.logs_path.mkdir(parents=True, exist_ok=True)
     log_files = _select_log_files(current.paths.logs_path, log)
     if not log_files:
         console.print(f"[yellow]No log files found in {current.paths.logs_path}[/yellow]")
         return
-    _tail_log_files(log_files, lines=lines, follow=follow)
+    event_prefix = "watch." if log == "watch" else None
+    _tail_log_files(log_files, lines=lines, follow=follow, event_prefix=event_prefix)
 
 
 @app.command("search", help="Search indexed local memory.")
@@ -631,7 +848,9 @@ def ask_command(
 
 @app.command("status", help="Show OpenMind storage and indexing information.")
 def status_command() -> None:
-    status = engine().status()
+    current = engine()
+    status = current.status()
+    watcher = current.watch_status()
     table = Table(title="OpenMind Status")
     table.add_column("Metric")
     table.add_column("Value")
@@ -640,7 +859,25 @@ def status_command() -> None:
     table.add_row("Enabled sources", str(status.enabled_sources))
     table.add_row("Files", str(status.files))
     table.add_row("Indexed files", str(status.indexed_files))
+    table.add_row("Watch mode", watcher.state)
+    table.add_row("Queued file changes", str(watcher.queued_jobs))
     console.print(table)
+
+
+def _watch_status_table(status: WatchStatus) -> Table:
+    table = Table(title="Watch Status")
+    table.add_column("Metric")
+    table.add_column("Value")
+    table.add_row("State", status.state)
+    table.add_row("Sources", str(len(status.sources)))
+    table.add_row("Queued changes", str(status.queued_jobs))
+    table.add_row("Current file", status.current_file or "")
+    table.add_row("Last event", status.last_event_at or "")
+    table.add_row("Last indexed", status.last_indexed_at or "")
+    table.add_row("Process id", str(status.pid or ""))
+    if status.errors:
+        table.add_row("Recent errors", "\n".join(status.errors))
+    return table
 
 
 @app.command("flush", help="Clear indexed memory without deleting user files.")
@@ -725,6 +962,12 @@ def flush_command(
             "to stop, then run `openmind flush` again.[/red]"
         )
         raise typer.Exit(1)
+    if not _stop_active_watch_for_cleanup(current, wait_seconds=wait):
+        console.print(
+            "[red]Watch mode is still active. Run `openmind watch stop`, wait for it "
+            "to stop, then run `openmind flush` again.[/red]"
+        )
+        raise typer.Exit(1)
 
     removed_counts = current.sqlite.flush_index_state(include_sources=include_sources)
     _reset_lancedb(current.paths.lancedb_path)
@@ -734,6 +977,7 @@ def flush_command(
     console.print(f"Removed file records: {removed_counts['files']}")
     console.print(f"Removed indexed file records: {removed_counts['indexed_files']}")
     console.print(f"Removed index jobs: {removed_counts['index_jobs']}")
+    console.print(f"Removed watch jobs: {removed_counts['watch_jobs']}")
     console.print(f"Removed index runs: {removed_counts['index_runs']}")
     if include_sources:
         console.print(f"Removed source records: {removed_counts['sources']}")
@@ -798,6 +1042,12 @@ def uninstall_command(
 
     if home.exists():
         _request_index_stop_before_uninstall(current)
+        if not _stop_active_watch_for_cleanup(current, wait_seconds=10):
+            console.print(
+                "[red]Watch mode is still active. Run `openmind watch stop`, wait for it "
+                "to stop, then run `openmind uninstall` again.[/red]"
+            )
+            raise typer.Exit(1)
         shutil.rmtree(home)
         console.print("[green]OpenMind local data removed.[/green]")
 
@@ -1107,6 +1357,25 @@ def _stop_active_index_job_for_flush(current: OpenMindEngine, wait_seconds: floa
     return False
 
 
+def _stop_active_watch_for_cleanup(current: OpenMindEngine, wait_seconds: float) -> bool:
+    try:
+        status = current.watch_status()
+    except sqlite3.Error:
+        return True
+    if status.state in {"stopped", "error"}:
+        return True
+
+    console.print("[yellow]Requesting watch mode to stop before cleanup.[/yellow]")
+    current.stop_watch()
+    deadline = time.time() + wait_seconds
+    while time.time() <= deadline:
+        updated = current.watch_status()
+        if updated.state in {"stopped", "error"}:
+            return True
+        time.sleep(0.1)
+    return False
+
+
 def _is_terminal_index_status(status: str) -> bool:
     return status in {"completed", "failed", "stopped"}
 
@@ -1205,6 +1474,30 @@ def _print_sources(sources) -> None:
     console.print(table)
 
 
+def _print_ignore_rules(rules: list[IgnoreRule]) -> None:
+    table = Table(title="Ignore Rules")
+    table.add_column("ID")
+    table.add_column("Type")
+    table.add_column("Value")
+    table.add_column("State")
+    table.add_column("Scope")
+    table.add_column("Source")
+    table.add_column("Owner")
+    table.add_column("Reason")
+    for rule in rules:
+        table.add_row(
+            rule.id,
+            rule.type,
+            rule.value,
+            "enabled" if rule.enabled else "disabled",
+            rule.scope,
+            rule.source_id or "",
+            "system" if rule.is_system else "user",
+            rule.reason or "",
+        )
+    console.print(table)
+
+
 def _print_models(title: str, models: list[LMStudioModel]) -> None:
     table = Table(title=title)
     table.add_column("Type")
@@ -1252,21 +1545,36 @@ def _select_log_files(logs_path: Path, log: str) -> list[Path]:
         return [logs_path / "openmind.log"] if (logs_path / "openmind.log").exists() else []
     if log == "index":
         return sorted(logs_path.glob("index-*.log"))
+    if log == "watch":
+        files = [logs_path / "openmind.log"] if (logs_path / "openmind.log").exists() else []
+        if (logs_path / "watch.log").exists():
+            files.append(logs_path / "watch.log")
+        return files
     if log == "all":
         files = [logs_path / "openmind.log"] if (logs_path / "openmind.log").exists() else []
         files.extend(sorted(logs_path.glob("index-*.log")))
+        if (logs_path / "watch.log").exists():
+            files.append(logs_path / "watch.log")
         return files
-    raise typer.BadParameter("Log must be one of: openmind, index, all")
+    raise typer.BadParameter("Log must be one of: openmind, index, watch, all")
 
 
-def _tail_log_files(paths: list[Path], lines: int, follow: bool) -> None:
+def _tail_log_files(
+    paths: list[Path],
+    lines: int,
+    follow: bool,
+    event_prefix: str | None = None,
+) -> None:
     positions: dict[Path, int] = {}
     for path in paths:
         if not path.exists():
             continue
-        recent = path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:]
+        contents = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        if event_prefix and path.name == "openmind.log":
+            contents = [line for line in contents if _log_event_matches(line, event_prefix)]
+        recent = contents[-lines:]
         for line in recent:
-            _print_log_line(path, line)
+            _print_log_line(path, line, event_prefix=event_prefix)
         positions[path] = path.stat().st_size
 
     if not follow:
@@ -1282,14 +1590,18 @@ def _tail_log_files(paths: list[Path], lines: int, follow: bool) -> None:
                 with path.open("r", encoding="utf-8", errors="replace") as handle:
                     handle.seek(position)
                     for line in handle:
-                        _print_log_line(path, line.rstrip("\n"))
+                        _print_log_line(
+                            path,
+                            line.rstrip("\n"),
+                            event_prefix=event_prefix,
+                        )
                     positions[path] = handle.tell()
             time.sleep(1)
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopped watching logs.[/yellow]")
 
 
-def _print_log_line(path: Path, line: str) -> None:
+def _print_log_line(path: Path, line: str, event_prefix: str | None = None) -> None:
     if not line:
         return
     try:
@@ -1298,10 +1610,20 @@ def _print_log_line(path: Path, line: str) -> None:
         console.print(f"[dim]{path.name}[/dim] {line}")
         return
     event = payload.pop("event", "log")
+    if event_prefix and path.name == "openmind.log" and not event.startswith(event_prefix):
+        return
     timestamp = payload.pop("time", "")
     message = payload.pop("message", "")
     details = " ".join(f"{key}={value}" for key, value in payload.items())
     console.print(f"[dim]{timestamp}[/dim] [bold]{event}[/bold] {message} [dim]{details}[/dim]")
+
+
+def _log_event_matches(line: str, event_prefix: str) -> bool:
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        return False
+    return str(payload.get("event", "")).startswith(event_prefix)
 
 
 def _stream_lmstudio_logs() -> None:

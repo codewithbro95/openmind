@@ -4,6 +4,8 @@ import hashlib
 from pathlib import Path
 
 from openmind.core.models import FileRecord, Source
+from openmind.ignore.engine import IgnoreEngine
+from openmind.ignore.models import IgnoreDecision
 
 SUPPORTED_EXTENSIONS = {
     ".txt",
@@ -11,7 +13,6 @@ SUPPORTED_EXTENSIONS = {
     ".pdf",
     ".docx",
     ".csv",
-    ".html",
     ".png",
     ".jpg",
     ".jpeg",
@@ -21,32 +22,10 @@ SUPPORTED_EXTENSIONS = {
     ".tiff",
 }
 
-IGNORED_DIRS = {
-    ".git",
-    "node_modules",
-    "venv",
-    ".venv",
-    ".env",
-    "__pycache__",
-    "dist",
-    "build",
-    ".cache",
-    ".build",
-    "target",
-    "coverage",
-    ".next",
-    ".nuxt",
-    ".turbo",
-    ".svelte-kit",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    "DerivedData",
-    "Assets.xcassets",
-}
-
-
 class FileScanner:
+    def __init__(self, ignore_engine: IgnoreEngine | None = None):
+        self.ignore_engine = ignore_engine or IgnoreEngine()
+
     def scan(
         self,
         source: Source,
@@ -60,38 +39,95 @@ class FileScanner:
         paths = root.rglob("*") if source.recursive else root.glob("*")
         records: list[FileRecord] = []
         for path in paths:
-            if self._should_ignore(path, root) or not path.is_file():
-                continue
-            extension = path.suffix.lower()
-            if extension not in extensions:
-                continue
-            stat = path.stat()
-            records.append(
-                FileRecord(
-                    id=f"file_{hashlib.sha1(str(path).encode('utf-8')).hexdigest()[:16]}",
-                    source_id=source.id,
-                    path=str(path),
-                    name=path.name,
-                    extension=extension,
-                    size=stat.st_size,
-                    modified_at=stat.st_mtime,
-                    content_hash=self.content_hash(path) if include_content_hash else "",
-                    status="pending",
-                )
+            record = self.record_for_path(
+                source,
+                path,
+                include_content_hash=include_content_hash,
+                supported_extensions=extensions,
             )
+            if record is None:
+                continue
+            records.append(record)
         return records
 
-    def _should_ignore(self, path: Path, root: Path) -> bool:
-        try:
-            relative_parts = path.relative_to(root).parts
-        except ValueError:
-            relative_parts = path.parts
-        for part in relative_parts:
-            if part in IGNORED_DIRS:
-                return True
-            if part.startswith(".") and part not in {".html"}:
-                return True
-        return False
+    def record_for_path(
+        self,
+        source: Source,
+        path: str | Path,
+        *,
+        include_content_hash: bool = False,
+        supported_extensions: set[str] | None = None,
+    ) -> FileRecord | None:
+        file_path = Path(path)
+        root = Path(source.path)
+        extensions = supported_extensions or SUPPORTED_EXTENSIONS
+        if not file_path.is_file():
+            return None
+        stat = file_path.stat()
+        if not self.is_supported_path(
+            file_path,
+            root,
+            extensions,
+            source_id=source.id,
+            metadata={"size": stat.st_size},
+        ):
+            return None
+        return FileRecord(
+            id=f"file_{hashlib.sha1(str(file_path).encode('utf-8')).hexdigest()[:16]}",
+            source_id=source.id,
+            path=str(file_path),
+            name=file_path.name,
+            extension=file_path.suffix.lower(),
+            size=stat.st_size,
+            modified_at=stat.st_mtime,
+            content_hash=self.content_hash(file_path) if include_content_hash else "",
+            status="pending",
+        )
+
+    def is_supported_path(
+        self,
+        path: str | Path,
+        root: str | Path,
+        supported_extensions: set[str] | None = None,
+        *,
+        source_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> bool:
+        file_path = Path(path).expanduser().resolve(strict=False)
+        root_path = Path(root).expanduser().resolve(strict=False)
+        extensions = supported_extensions or SUPPORTED_EXTENSIONS
+        return bool(
+            file_path.suffix.lower() in extensions
+            and _is_within(file_path, root_path)
+            and not self.should_ignore(
+                file_path,
+                root_path,
+                source_id=source_id,
+                metadata=metadata,
+            )
+        )
+
+    def should_ignore(
+        self,
+        path: str | Path,
+        root: str | Path,
+        *,
+        source_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> bool:
+        file_path = Path(path).expanduser().resolve(strict=False)
+        root_path = Path(root).expanduser().resolve(strict=False)
+        if not _is_within(file_path, root_path):
+            return True
+        return self.ignore_decision(file_path, source_id, metadata).ignored
+
+    def ignore_decision(
+        self,
+        path: str | Path,
+        source_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> IgnoreDecision:
+        return self.ignore_engine.should_ignore(path, source_id=source_id, metadata=metadata)
 
     def content_hash(self, path: Path) -> str:
         digest = hashlib.sha256()
@@ -99,3 +135,11 @@ class FileScanner:
             for block in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(block)
         return digest.hexdigest()
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True

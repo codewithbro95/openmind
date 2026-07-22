@@ -1,11 +1,9 @@
 from openmind.core.config import ExtractionSettings, OCRSettings
 from openmind.extractors.base import Extractor, ExtractorRegistry
-from openmind.extractors.code import CodeExtractor
 from openmind.extractors.docx import DocxExtractor
-from openmind.extractors.html import HtmlExtractor
 from openmind.extractors.image import ImageExtractor
 from openmind.extractors.pdf import PDFExtractor
-from openmind.extractors.tabular import CsvExtractor, JsonExtractor
+from openmind.extractors.tabular import CsvExtractor
 from openmind.extractors.text import MarkdownExtractor, TextExtractor
 
 
@@ -28,17 +26,8 @@ def default_registry(
                 description_provider=image_description_provider,
             )
         )
-    extractors.extend(
-        [
-            CodeExtractor(),
-            JsonExtractor(),
-            CsvExtractor(),
-            HtmlExtractor(),
-        ]
-    )
-    return ExtractorRegistry(
-        extractors
-    )
+    extractors.append(CsvExtractor())
+    return ExtractorRegistry(extractors)
 
 
 __all__ = [

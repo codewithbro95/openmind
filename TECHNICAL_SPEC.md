@@ -38,6 +38,7 @@ openmind-core/
 │   │       ├── models.py
 │   │       ├── sources.py
 │   │       ├── indexing.py
+│   │       ├── watching.py
 │   │       ├── memory.py
 │   │       └── actions.py
 │   ├── core/
@@ -47,6 +48,11 @@ openmind-core/
 │   ├── sources/
 │   │   ├── manager.py
 │   │   └── scanner.py
+│   ├── ignore/
+│   │   ├── defaults.py
+│   │   ├── engine.py
+│   │   ├── errors.py
+│   │   └── models.py
 │   ├── extractors/
 │   │   ├── base.py
 │   │   ├── text.py
@@ -54,9 +60,7 @@ openmind-core/
 │   │   ├── ocr.py
 │   │   ├── image.py
 │   │   ├── docx.py
-│   │   ├── code.py
 │   │   ├── tabular.py
-│   │   └── html.py
 │   ├── ingestion/
 │   │   ├── normalizer.py
 │   │   └── chunker.py
@@ -76,6 +80,13 @@ openmind-core/
 │   ├── retrieval/
 │   │   ├── search.py
 │   │   └── context.py
+│   ├── watcher/
+│   │   ├── service.py
+│   │   ├── events.py
+│   │   ├── handler.py
+│   │   ├── debounce.py
+│   │   ├── errors.py
+│   │   └── state.py
 │   └── llm/
 │       └── answer.py
 ├── tests/
@@ -102,8 +113,8 @@ Runtime:
 - `pillow`
 - `rapidocr-onnxruntime`
 - `python-docx`
-- `beautifulsoup4`
 - `pandas`
+- `watchdog`
 
 Development:
 
@@ -131,9 +142,6 @@ uv sync --all-extras
 
 Later, not included yet:
 
-- `fastapi`
-- `uvicorn`
-- `watchdog`
 - `llama-cpp-python`
 - `ollama`
 
@@ -223,6 +231,61 @@ CREATE TABLE index_jobs (
 );
 ```
 
+### `watch_state`
+
+```sql
+CREATE TABLE watch_state (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  started_at TEXT,
+  stopped_at TEXT,
+  updated_at TEXT,
+  pid INTEGER,
+  error TEXT,
+  current_file TEXT,
+  last_event_at TEXT,
+  last_indexed_at TEXT,
+  sources_json TEXT NOT NULL DEFAULT '[]'
+);
+```
+
+### `watch_jobs`
+
+```sql
+CREATE TABLE watch_jobs (
+  id TEXT PRIMARY KEY,
+  job_type TEXT NOT NULL,
+  path TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT
+);
+```
+
+### `ignore_rules`
+
+```sql
+CREATE TABLE ignore_rules (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  value TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  scope TEXT NOT NULL DEFAULT 'global',
+  source_id TEXT,
+  reason TEXT,
+  is_system INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(source_id) REFERENCES sources(id)
+);
+```
+
 ## LanceDB Schema
 
 Table: `chunks`
@@ -258,6 +321,17 @@ openmind index status
 openmind index pause
 openmind index resume
 openmind index stop
+openmind watch
+openmind watch status
+openmind watch stop
+openmind ignore list
+openmind ignore add extension <extension>
+openmind ignore add pattern <pattern>
+openmind ignore add path <path>
+openmind ignore enable <rule_id>
+openmind ignore disable <rule_id>
+openmind ignore remove <rule_id>
+openmind ignore test <path>
 openmind models list
 openmind models load
 openmind models update
@@ -582,7 +656,9 @@ OpenMind should tell the user when unchanged files are already indexed and acces
 
 Discovery should be metadata-first. It should not compute content hashes for every discovered file before indexing starts, because that makes large folders appear stuck and wastes work for unchanged files.
 
-Default scanning is document-first plus supported images. OpenMind should index human-facing files such as `.txt`, `.md`, `.pdf`, `.docx`, `.csv`, `.html`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tif`, and `.tiff`. It should not index source code, JSON config/package files, generated build artifacts, app asset catalogs such as `Assets.xcassets`, dependency folders, or other low-level project internals unless a future opt-in code indexing mode is added.
+Default scanning is document-first plus supported images. OpenMind should index human-facing files such as `.txt`, `.md`, `.pdf`, `.docx`, `.csv`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tif`, and `.tiff`. It does not support indexing source code, HTML, JSON config/package files, generated build artifacts, app asset catalogs such as `Assets.xcassets`, dependency folders, or other low-level project internals. Markdown is the supported format for high-level project documentation.
+
+During initialization, OpenMind removes SQLite file records and LanceDB chunks for extensions that are no longer supported. This cleanup affects OpenMind-owned index data only and never deletes or modifies source files.
 
 ## Search Flow
 
@@ -654,6 +730,43 @@ processed_files / total_files * 100
 ```
 
 No Celery, Redis, external queue, or daemon manager is included.
+
+## Watch Mode
+
+`openmind watch` starts a detached local worker that keeps enabled, user-approved sources synchronized after the launching terminal exits. The worker first performs a metadata-only catch-up scan, then schedules a recursive watchdog observer for each available source.
+
+The live event flow is:
+
+```text
+watchdog event -> normalize and filter -> debounce by path -> SQLite job -> worker -> SQLite + LanceDB
+```
+
+Filesystem callbacks never extract or embed content. They use the scanner's shared extension and ignore rules, then replace any pending job for the same path. Deletes have higher queue priority than indexing work. Before reading a created or modified file, the worker requires two consecutive size and modified-time snapshots to match.
+
+Job behavior:
+
+- `index_file`: index a newly discovered supported file.
+- `reindex_file`: run normal incremental indexing for a changed file and replace stale chunks when content changed.
+- `delete_file`: remove the file record from SQLite and all associated chunks from LanceDB.
+- A move is represented as `delete_file` for the old path plus `index_file` for the destination.
+
+`watch_state` stores lifecycle, process, current-file, source, and activity timestamps. `watch_jobs` stores durable pending, processing, completed, and failed file synchronization work. Processing jobs left by an interrupted watcher return to pending on the next start. A failed file is recorded and does not terminate the loop.
+
+CLI and API start operations call the same engine method, which starts at most one worker and redirects its standard output and error to `~/.openmind/logs/watch.log`. Structured watcher lifecycle, event, queue, processing, and error records are written to `~/.openmind/logs/openmind.log` and can be followed with `openmind dev logs --log watch`. `openmind watch status` and the API status endpoint read the same SQLite state. Stop operations write `stop_requested`, which the worker observes between jobs. There is no automatic login service or general daemon manager, so watch mode must be started again after a machine reboot or unexpected process termination.
+
+## Ignore Rule Flow
+
+SQLite is the source of truth for protected defaults and user-created rules. `IgnoreEngine` validates and normalizes every mutation, caches active rules briefly for large scans, and returns an explainable `IgnoreDecision` for each path.
+
+```text
+path + source + metadata -> IgnoreEngine -> allowed or matched rule + reason
+```
+
+The scanner calls the engine before creating a file record. Watchdog handlers call the same scanner check before debouncing an event, so CLI indexing, background indexing, and Watch Mode cannot use different exclusion behavior. Rule matching uses bounded values and safe glob matching rather than regular expressions or executable configuration.
+
+Global rules apply to every source. Source rules require a valid `source_id` and are removed with that source. System rules are inserted idempotently during SQLite initialization and cannot be changed or deleted. Adding or enabling a user rule reconciles existing file records immediately: matching LanceDB chunks are deleted, the file record is marked skipped with the rule reason, and the original file remains untouched. Disabling or removing a rule makes files eligible for a later index run.
+
+`.openmindignore` is reserved as a possible future import/export convenience and is not part of the current decision path.
 
 ## LM Studio Failure Handling
 
