@@ -48,6 +48,11 @@ openmind-core/
 │   ├── sources/
 │   │   ├── manager.py
 │   │   └── scanner.py
+│   ├── ignore/
+│   │   ├── defaults.py
+│   │   ├── engine.py
+│   │   ├── errors.py
+│   │   └── models.py
 │   ├── extractors/
 │   │   ├── base.py
 │   │   ├── text.py
@@ -263,6 +268,24 @@ CREATE TABLE watch_jobs (
 );
 ```
 
+### `ignore_rules`
+
+```sql
+CREATE TABLE ignore_rules (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  value TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  scope TEXT NOT NULL DEFAULT 'global',
+  source_id TEXT,
+  reason TEXT,
+  is_system INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(source_id) REFERENCES sources(id)
+);
+```
+
 ## LanceDB Schema
 
 Table: `chunks`
@@ -301,6 +324,14 @@ openmind index stop
 openmind watch
 openmind watch status
 openmind watch stop
+openmind ignore list
+openmind ignore add extension <extension>
+openmind ignore add pattern <pattern>
+openmind ignore add path <path>
+openmind ignore enable <rule_id>
+openmind ignore disable <rule_id>
+openmind ignore remove <rule_id>
+openmind ignore test <path>
 openmind models list
 openmind models load
 openmind models update
@@ -722,6 +753,20 @@ Job behavior:
 `watch_state` stores lifecycle, process, current-file, source, and activity timestamps. `watch_jobs` stores durable pending, processing, completed, and failed file synchronization work. Processing jobs left by an interrupted watcher return to pending on the next start. A failed file is recorded and does not terminate the loop.
 
 CLI and API start operations call the same engine method, which starts at most one worker and redirects its standard output and error to `~/.openmind/logs/watch.log`. Structured watcher lifecycle, event, queue, processing, and error records are written to `~/.openmind/logs/openmind.log` and can be followed with `openmind dev logs --log watch`. `openmind watch status` and the API status endpoint read the same SQLite state. Stop operations write `stop_requested`, which the worker observes between jobs. There is no automatic login service or general daemon manager, so watch mode must be started again after a machine reboot or unexpected process termination.
+
+## Ignore Rule Flow
+
+SQLite is the source of truth for protected defaults and user-created rules. `IgnoreEngine` validates and normalizes every mutation, caches active rules briefly for large scans, and returns an explainable `IgnoreDecision` for each path.
+
+```text
+path + source + metadata -> IgnoreEngine -> allowed or matched rule + reason
+```
+
+The scanner calls the engine before creating a file record. Watchdog handlers call the same scanner check before debouncing an event, so CLI indexing, background indexing, and Watch Mode cannot use different exclusion behavior. Rule matching uses bounded values and safe glob matching rather than regular expressions or executable configuration.
+
+Global rules apply to every source. Source rules require a valid `source_id` and are removed with that source. System rules are inserted idempotently during SQLite initialization and cannot be changed or deleted. Adding or enabling a user rule reconciles existing file records immediately: matching LanceDB chunks are deleted, the file record is marked skipped with the rule reason, and the original file remains untouched. Disabling or removing a rule makes files eligible for a later index run.
+
+`.openmindignore` is reserved as a possible future import/export convenience and is not part of the current decision path.
 
 ## LM Studio Failure Handling
 

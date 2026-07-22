@@ -355,6 +355,7 @@ class WatchService:
             path,
             source.path,
             self.supported_extensions,
+            source_id=source.id,
         ):
             self._delete_path(job.path)
             return

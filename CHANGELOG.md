@@ -4,6 +4,11 @@ User-facing changes for each OpenMind Core release.
 
 ## Unreleased
 
+- No unreleased changes.
+
+## 0.0.7 - 2026-07-22
+
+- Added ignore rules through the CLI and API, with protected defaults, source scopes, path testing, and shared indexing and Watch Mode behavior.
 - Added background watch mode to keep enabled source folders synchronized after files are created, changed, moved, or deleted, with shared CLI and local API controls.
 - Each chat message now retrieves fresh context for its own question, including when the topic changes during a session.
 - Source code, HTML, and JSON are no longer available through the indexing pipeline; existing indexed memory for those formats is removed without touching the original files.

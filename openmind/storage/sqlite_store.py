@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Iterator
 
 from openmind.core.models import FileRecord, IndexJob, Source, StatusSummary
+from openmind.ignore.defaults import SYSTEM_IGNORE_RULES
+from openmind.ignore.models import IgnoreRule
 from openmind.watcher.state import WatchJob, WatchState
 
 
@@ -117,9 +119,40 @@ class SQLiteStore:
 
                 CREATE UNIQUE INDEX IF NOT EXISTS watch_jobs_one_pending_path
                 ON watch_jobs(path) WHERE status = 'pending';
+
+                CREATE TABLE IF NOT EXISTS ignore_rules (
+                  id TEXT PRIMARY KEY,
+                  type TEXT NOT NULL,
+                  value TEXT NOT NULL,
+                  enabled INTEGER NOT NULL DEFAULT 1,
+                  scope TEXT NOT NULL DEFAULT 'global',
+                  source_id TEXT,
+                  reason TEXT,
+                  is_system INTEGER NOT NULL DEFAULT 0,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  FOREIGN KEY(source_id) REFERENCES sources(id)
+                );
+
+                CREATE INDEX IF NOT EXISTS ignore_rules_enabled_scope
+                ON ignore_rules(enabled, scope, source_id);
                 """
             )
             self._ensure_column(conn, "index_jobs", "already_indexed_files", "INTEGER DEFAULT 0")
+            self._seed_system_ignore_rules(conn)
+
+    def _seed_system_ignore_rules(self, conn: sqlite3.Connection) -> None:
+        now = utc_now()
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO ignore_rules (
+              id, type, value, enabled, scope, source_id, reason,
+              is_system, created_at, updated_at
+            )
+            VALUES (?, ?, ?, 1, 'global', NULL, ?, 1, ?, ?)
+            """,
+            [(rule.id, rule.type, rule.value, rule.reason, now, now) for rule in SYSTEM_IGNORE_RULES],
+        )
 
     def _ensure_column(
         self,
@@ -196,8 +229,14 @@ class SQLiteStore:
                 "DELETE FROM files WHERE source_id = ?",
                 (source_id,),
             ).rowcount
+            conn.execute("DELETE FROM ignore_rules WHERE source_id = ?", (source_id,))
             conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
             return files_removed
+
+    def list_files(self) -> list[FileRecord]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM files ORDER BY path ASC").fetchall()
+        return [self._file_from_row(row) for row in rows]
 
     def orphaned_source_ids(self) -> list[str]:
         with self.connect() as conn:
@@ -317,8 +356,76 @@ class SQLiteStore:
             conn.execute("DELETE FROM watch_jobs")
             conn.execute("DELETE FROM watch_state")
             if include_sources:
+                conn.execute("DELETE FROM ignore_rules WHERE scope = 'source'")
                 conn.execute("DELETE FROM sources")
         return counts
+
+    def list_ignore_rules(self, enabled_only: bool = False) -> list[IgnoreRule]:
+        query = "SELECT * FROM ignore_rules"
+        params: tuple[int, ...] = ()
+        if enabled_only:
+            query += " WHERE enabled = ?"
+            params = (1,)
+        query += " ORDER BY is_system DESC, created_at ASC, id ASC"
+        with self.connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self._ignore_rule_from_row(row) for row in rows]
+
+    def ignore_rule_by_id(self, rule_id: str) -> IgnoreRule | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM ignore_rules WHERE id = ?", (rule_id,)).fetchone()
+        return self._ignore_rule_from_row(row) if row is not None else None
+
+    def find_ignore_rule(
+        self,
+        rule_type: str,
+        value: str,
+        scope: str,
+        source_id: str | None,
+    ) -> IgnoreRule | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM ignore_rules
+                WHERE type = ? AND value = ? AND scope = ?
+                  AND ((source_id IS NULL AND ? IS NULL) OR source_id = ?)
+                LIMIT 1
+                """,
+                (rule_type, value, scope, source_id, source_id),
+            ).fetchone()
+        return self._ignore_rule_from_row(row) if row is not None else None
+
+    def add_ignore_rule(self, rule: IgnoreRule) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO ignore_rules (
+                  id, type, value, enabled, scope, source_id, reason,
+                  is_system, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                self._ignore_rule_values(rule),
+            )
+
+    def update_ignore_rule(self, rule: IgnoreRule) -> None:
+        with self.connect() as conn:
+            result = conn.execute(
+                """
+                UPDATE ignore_rules
+                SET type = ?, value = ?, enabled = ?, scope = ?, source_id = ?,
+                    reason = ?, is_system = ?, created_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (*self._ignore_rule_values(rule)[1:], rule.id),
+            )
+        if result.rowcount == 0:
+            raise KeyError(f"Unknown ignore rule: {rule.id}")
+
+    def delete_ignore_rule(self, rule_id: str) -> bool:
+        with self.connect() as conn:
+            result = conn.execute("DELETE FROM ignore_rules WHERE id = ?", (rule_id,))
+        return result.rowcount > 0
 
     def create_index_job(self, job_id: str) -> IndexJob:
         now = utc_now()
@@ -678,4 +785,32 @@ class SQLiteStore:
             updated_at=row["updated_at"],
             started_at=row["started_at"],
             completed_at=row["completed_at"],
+        )
+
+    def _ignore_rule_from_row(self, row: sqlite3.Row) -> IgnoreRule:
+        return IgnoreRule(
+            id=row["id"],
+            type=row["type"],
+            value=row["value"],
+            enabled=bool(row["enabled"]),
+            scope=row["scope"],
+            source_id=row["source_id"],
+            reason=row["reason"],
+            is_system=bool(row["is_system"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def _ignore_rule_values(self, rule: IgnoreRule) -> tuple[object, ...]:
+        return (
+            rule.id,
+            rule.type,
+            rule.value,
+            int(rule.enabled),
+            rule.scope,
+            rule.source_id,
+            rule.reason,
+            int(rule.is_system),
+            rule.created_at,
+            rule.updated_at,
         )

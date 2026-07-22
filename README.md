@@ -209,6 +209,25 @@ Removing a source also removes its file records, chunks, and embeddings from Ope
 
 If a folder was already added, OpenMind tells you it is already registered and reports indexed files that are already accessible.
 
+Ignore rules:
+
+```bash
+openmind ignore list
+openmind ignore add path ~/Documents/Private
+openmind ignore add pattern "*.backup.pdf"
+openmind ignore add extension .mp4
+openmind ignore add folder-name archive
+openmind ignore add file-name personal-notes.txt
+openmind ignore add source-type image --scope source --source <source_id>
+openmind ignore add max-file-size 100MB
+openmind ignore test ~/Documents/Private/notes.pdf
+openmind ignore disable <rule_id>
+openmind ignore enable <rule_id>
+openmind ignore remove <rule_id>
+```
+
+Rules are stored in SQLite and shared by normal indexing, background Watch Mode, the CLI, and API clients. Adding or enabling a rule immediately removes matching content from searchable memory without deleting or modifying the original files.
+
 Indexing:
 
 ```bash
@@ -769,6 +788,68 @@ openmind watch stop
 
 The worker is detached from the launching terminal, so closing the terminal does not stop it. CLI and API start, status, and stop operations use the same watcher service and SQLite state. Watch mode uses the same supported formats and ignore rules as regular indexing. Files created or modified in quick succession are debounced, and OpenMind waits for a file's size and modified time to stabilize before reading it. A failure is recorded for that file while the watcher continues processing later changes.
 
+## Ignore Rules
+
+Privacy is the core of OpenMind, it gives you precise control over what becomes part of your private local memory. Ignore rules let users and client applications control what enters local memory without editing configuration files. Rules can match an exact path, folder name, file name, extension, glob pattern, document category, maximum file size, or hidden paths. They can apply globally or to one source.
+
+List protected defaults and user rules:
+
+```bash
+openmind ignore list
+```
+
+Create global rules:
+
+```bash
+openmind ignore add extension .mp4 --reason "Video files"
+openmind ignore add pattern "private-*"
+openmind ignore add path ~/Documents/Taxes
+openmind ignore add max-file-size 100MB
+```
+
+Limit a rule to one approved source:
+
+```bash
+openmind ignore add source-type image --scope source --source <source_id>
+```
+
+This tells OpenMind to ignore every supported image inside one specific source folder while continuing to index images from other sources. `source-type` is the rule type and `image` is its value. OpenMind does not guess this category: it checks the file extension against a predefined category list. In `openmind ignore list`, this rule therefore appears with `source_type` under **Type** and `image` under **Value**.
+
+The available source-type values are:
+
+| Value | File extensions it matches |
+| --- | --- |
+| `image` | `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tif`, `.tiff` |
+| `document` | `.txt`, `.md`, `.pdf`, `.docx`, `.csv` |
+| `text` | `.txt` |
+| `markdown` | `.md` |
+| `pdf` | `.pdf` |
+| `word` | `.docx` |
+| `csv` | `.csv` |
+
+`--scope source` limits the rule to one source, and `--source` identifies that source. Find the ID with `openmind source list`, then use it in the command:
+
+```bash
+openmind source list
+openmind ignore add source-type image --scope source --source src_a1b2c3d4
+```
+
+For example, if `src_a1b2c3d4` represents `~/Downloads`, images in `~/Downloads` will be ignored, but images in another added folder such as `~/Pictures` remain eligible for indexing. To ignore images in every source instead, omit the scope and source options:
+
+```bash
+openmind ignore add source-type image
+```
+
+Explain a decision before indexing:
+
+```bash
+openmind ignore test ~/Documents/Taxes/receipt.pdf
+```
+
+OpenMind protects common dependency, build, cache, temporary, database, environment, and private-key files with visible system rules. System rules cannot be disabled or removed. User rules can be enabled, disabled, or removed. After disabling or removing a rule, run `openmind index` to include files that are eligible again.
+
+The authenticated local API exposes the same engine through `/api/v1/ignore-rules`, including a test endpoint suitable for settings screens in client applications. `.openmindignore` is not required or implemented as the primary rule system.
+
 ## Logs
 
 OpenMind writes structured logs to:
@@ -807,7 +888,7 @@ Watch only index worker logs:
 openmind dev logs --log index
 ```
 
-Watch only detached watch-worker output:
+Watch structured watcher activity and detached worker errors:
 
 ```bash
 openmind dev logs --log watch

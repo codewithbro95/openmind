@@ -32,6 +32,8 @@ from openmind.core.config import (
 from openmind.core.engine import OpenMindEngine
 from openmind.core.errors import SourceRemovalBlockedError
 from openmind.core.models import IndexJob, IndexSummary, SearchResult
+from openmind.ignore.errors import IgnoreRuleError
+from openmind.ignore.models import IgnoreRule
 from openmind.providers.lmstudio.errors import LMStudioConnectionError, LMStudioError
 from openmind.providers.lmstudio.models import LMStudioModel, split_models, vision_models
 from openmind.retrieval.context import format_sources
@@ -46,6 +48,8 @@ provider_app = typer.Typer(help="Inspect provider status.")
 dev_app = typer.Typer(help="Developer tools.")
 api_app = typer.Typer(help="Manage local API access.")
 watch_app = typer.Typer(help="Keep indexed memory synchronized with source folders.")
+ignore_app = typer.Typer(help="Manage programmable indexing exclusions.")
+ignore_add_app = typer.Typer(help="Add an ignore rule.")
 app.add_typer(source_app, name="source")
 app.add_typer(index_app, name="index")
 app.add_typer(models_app, name="models")
@@ -53,6 +57,8 @@ app.add_typer(provider_app, name="provider")
 app.add_typer(dev_app, name="dev")
 app.add_typer(api_app, name="api")
 app.add_typer(watch_app, name="watch")
+app.add_typer(ignore_app, name="ignore")
+ignore_app.add_typer(ignore_add_app, name="add")
 console = Console()
 
 OPENMIND_BANNER = r"""
@@ -231,6 +237,173 @@ def source_remove(source_id: str) -> None:
     console.print(f"File records removed: {result.files_removed}")
     console.print(f"Memory chunks removed: {result.chunks_removed}")
     console.print(f"Original folder and files were not deleted: {result.source_path}")
+
+
+@ignore_app.command("list", help="List protected and user-created ignore rules.")
+def ignore_list() -> None:
+    _print_ignore_rules(engine().list_ignore_rules())
+
+
+def _add_ignore_rule(
+    rule_type: str,
+    value: str,
+    options: tuple[str, str | None, str | None, bool],
+) -> None:
+    scope, source_id, reason, enabled = options
+    try:
+        rule = engine().add_ignore_rule(
+            rule_type,
+            value,
+            enabled=enabled,
+            scope=scope,
+            source_id=source_id,
+            reason=reason,
+        )
+    except IgnoreRuleError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]Added ignore rule[/green] {rule.id}: {rule.type} {rule.value}")
+    if rule.enabled:
+        console.print("Matching indexed content is no longer searchable.")
+
+
+@ignore_add_app.command("path", help="Ignore a file or folder path.")
+def ignore_add_path(
+    path: str,
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("path", path, (scope, source_id, reason, enabled))
+
+
+@ignore_add_app.command("pattern", help="Ignore matching file names or relative paths.")
+def ignore_add_pattern(
+    pattern: str,
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("pattern", pattern, (scope, source_id, reason, enabled))
+
+
+@ignore_add_app.command("extension", help="Ignore a file extension such as .mp4.")
+def ignore_add_extension(
+    extension: str,
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("extension", extension, (scope, source_id, reason, enabled))
+
+
+@ignore_add_app.command("folder-name", help="Ignore folders with this exact name.")
+def ignore_add_folder_name(
+    name: str,
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("folder_name", name, (scope, source_id, reason, enabled))
+
+
+@ignore_add_app.command("file-name", help="Ignore files with this exact name.")
+def ignore_add_file_name(
+    name: str,
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("file_name", name, (scope, source_id, reason, enabled))
+
+
+@ignore_add_app.command(
+    "source-type",
+    help="Ignore a predefined category: image, document, text, markdown, pdf, word, or csv.",
+)
+def ignore_add_source_type(
+    source_type: str,
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("source_type", source_type, (scope, source_id, reason, enabled))
+
+
+@ignore_add_app.command("max-file-size", help="Ignore files larger than a size such as 100MB.")
+def ignore_add_max_file_size(
+    size: str,
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("max_file_size", size, (scope, source_id, reason, enabled))
+
+
+@ignore_add_app.command("hidden-files", help="Ignore hidden files and folders.")
+def ignore_add_hidden_files(
+    scope: str = typer.Option("global", "--scope"),
+    source_id: str | None = typer.Option(None, "--source"),
+    reason: str | None = typer.Option(None, "--reason"),
+    enabled: bool = typer.Option(True, "--enabled/--disabled"),
+) -> None:
+    _add_ignore_rule("hidden_files", "true", (scope, source_id, reason, enabled))
+
+
+@ignore_app.command("remove", help="Remove a user-created ignore rule.")
+def ignore_remove(rule_id: str) -> None:
+    try:
+        rule = engine().remove_ignore_rule(rule_id)
+    except IgnoreRuleError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]Removed ignore rule[/green] {rule.id}")
+    console.print("Run `openmind index` to include files that are no longer ignored.")
+
+
+def _set_ignore_rule_enabled(rule_id: str, enabled: bool) -> None:
+    try:
+        rule = engine().update_ignore_rule(rule_id, enabled=enabled)
+    except IgnoreRuleError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    state = "enabled" if rule.enabled else "disabled"
+    console.print(f"[green]Ignore rule {state}[/green] {rule.id}")
+    if not enabled:
+        console.print("Run `openmind index` to include files that are no longer ignored.")
+
+
+@ignore_app.command("enable", help="Enable a user-created ignore rule.")
+def ignore_enable(rule_id: str) -> None:
+    _set_ignore_rule_enabled(rule_id, True)
+
+
+@ignore_app.command("disable", help="Disable a user-created ignore rule.")
+def ignore_disable(rule_id: str) -> None:
+    _set_ignore_rule_enabled(rule_id, False)
+
+
+@ignore_app.command("test", help="Explain whether a path is ignored.")
+def ignore_test(
+    path: str,
+    source_id: str | None = typer.Option(None, "--source", help="Optional source id."),
+) -> None:
+    decision = engine().test_ignore_path(path, source_id=source_id)
+    if not decision.ignored:
+        console.print("[green]Allowed[/green] This path is eligible for indexing.")
+        return
+    console.print("[yellow]Ignored[/yellow]")
+    console.print(f"Rule: {decision.rule_id}")
+    console.print(f"Type: {decision.rule_type}")
+    console.print(f"Value: {decision.rule_value}")
+    console.print(f"Reason: {decision.reason}")
 
 
 @index_app.callback(invoke_without_command=True)
@@ -1298,6 +1471,30 @@ def _print_sources(sources) -> None:
     table.add_column("Enabled")
     for source in sources:
         table.add_row(source.id, source.path, str(source.recursive), str(source.enabled))
+    console.print(table)
+
+
+def _print_ignore_rules(rules: list[IgnoreRule]) -> None:
+    table = Table(title="Ignore Rules")
+    table.add_column("ID")
+    table.add_column("Type")
+    table.add_column("Value")
+    table.add_column("State")
+    table.add_column("Scope")
+    table.add_column("Source")
+    table.add_column("Owner")
+    table.add_column("Reason")
+    for rule in rules:
+        table.add_row(
+            rule.id,
+            rule.type,
+            rule.value,
+            "enabled" if rule.enabled else "disabled",
+            rule.scope,
+            rule.source_id or "",
+            "system" if rule.is_system else "user",
+            rule.reason or "",
+        )
     console.print(table)
 
 

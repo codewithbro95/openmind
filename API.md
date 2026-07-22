@@ -86,6 +86,11 @@ curl http://127.0.0.1:8765/api/v1/search \
 | `GET` | `/api/v1/sources` | List user-approved source folders |
 | `POST` | `/api/v1/sources` | Add a source folder |
 | `DELETE` | `/api/v1/sources/{source_id}` | Remove a source and its indexed memory |
+| `GET` | `/api/v1/ignore-rules` | List protected and user ignore rules |
+| `POST` | `/api/v1/ignore-rules` | Create an ignore rule |
+| `PATCH` | `/api/v1/ignore-rules/{rule_id}` | Update a user ignore rule |
+| `DELETE` | `/api/v1/ignore-rules/{rule_id}` | Remove a user ignore rule |
+| `POST` | `/api/v1/ignore-rules/test` | Explain whether a path is ignored |
 | `POST` | `/api/v1/index/start` | Start or return the active background indexing job |
 | `GET` | `/api/v1/index/status` | Read indexing progress |
 | `POST` | `/api/v1/index/pause` | Request indexing pause |
@@ -113,6 +118,48 @@ curl -X POST http://127.0.0.1:8765/api/v1/watch/start \
 The API and CLI use the same watcher service and shared SQLite state. Starting through either interface creates one detached local worker that remains active after the launching client or terminal exits. Repeated start requests return the current active watcher instead of creating duplicates. Status includes watched source paths, queued jobs, the current file, latest event and indexing timestamps, and recent file errors. Stop requests are cooperative and take effect after the current file operation finishes.
 
 The watcher only observes enabled sources already approved through OpenMind. It does not modify or delete user files; a deleted source file only causes its OpenMind metadata and searchable chunks to be removed.
+
+## Ignore rules
+
+Client applications can manage the same indexing rules used by the CLI, scanner, and watcher. Create a global rule:
+
+```json
+{
+  "type": "extension",
+  "value": ".mp4",
+  "enabled": true,
+  "scope": "global",
+  "source_id": null,
+  "reason": "Video files"
+}
+```
+
+For a source-specific rule, set `scope` to `source` and provide an existing `source_id`. Supported types are `path`, `folder_name`, `file_name`, `extension`, `pattern`, `source_type`, `max_file_size`, and `hidden_files`.
+
+Test a path without indexing it:
+
+```json
+{
+  "path": "/Users/example/Documents/private/receipt.pdf",
+  "source_id": "src_0123456789ab"
+}
+```
+
+The response is explainable:
+
+```json
+{
+  "ignored": true,
+  "matched_rule": {
+    "id": "ign_0123456789abcdef",
+    "type": "path",
+    "value": "/Users/example/Documents/private",
+    "reason": "Private folder"
+  }
+}
+```
+
+System rules are visible but protected from updates and deletion. Adding or enabling a rule immediately removes matching content from LanceDB and marks its file record as skipped; original files are never changed. After disabling or deleting a user rule, start indexing to include newly eligible files.
 
 ## Sources
 

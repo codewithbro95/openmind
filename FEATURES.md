@@ -61,17 +61,26 @@ Current boundaries:
 - User-approved folders only.
 - Re-adding an existing source reports that it is already registered.
 - Recursive folder scanning.
-- Ignores noisy folders:
-  - `.git`
-  - `node_modules`
-  - `venv`
-  - `.venv`
-  - `.env`
-  - `__pycache__`
-  - `dist`
-  - `build`
-  - `.cache`
-  - hidden folders
+
+### Ignore Rules
+
+- First-class SQLite-backed rules shared by indexing and Watch Mode.
+- CLI and authenticated API management use the same engine methods.
+- Global and source-specific scopes.
+- Rule types:
+  - exact path
+  - folder name
+  - file name
+  - extension
+  - glob pattern
+  - source type
+  - maximum file size
+  - hidden files and folders
+- Explainable path testing reports the matching rule and reason.
+- Protected system rules cover dependencies, generated output, caches, temporary downloads, local databases, environment files, and private keys.
+- System rules are visible and cannot be disabled or removed.
+- Adding or enabling a rule immediately removes matching searchable chunks while preserving original files.
+- Disabling or removing a user rule makes matching files eligible for the next index run.
 
 ### File Support
 
@@ -263,6 +272,7 @@ Image files are indexed by generating text descriptions through a local vision m
 - Status and model-provider inspection.
 - Model listing, validated selection, and loading.
 - Source listing, creation, and removal.
+- Ignore-rule listing, creation, update, removal, and path testing.
 - Start, status, pause, resume, and stop indexing operations.
 - Search responses with paths, snippets, scores, metadata, and stable file IDs.
 - Source-grounded synchronous Ask responses.

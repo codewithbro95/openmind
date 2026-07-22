@@ -28,6 +28,8 @@ from openmind.embeddings.provider import EmbeddingProvider, SentenceTransformerE
 from openmind.extractors import ExtractorRegistry, default_registry
 from openmind.ingestion.chunker import TextChunker
 from openmind.ingestion.normalizer import normalize_text
+from openmind.ignore.engine import IgnoreEngine
+from openmind.ignore.models import IgnoreDecision, IgnoreRule
 from openmind.llm.answer import AnswerProvider, ContextOnlyAnswerProvider
 from openmind.llm.session import ChatSession
 from openmind.providers.lmstudio import (
@@ -65,7 +67,8 @@ class OpenMindEngine:
         self.sqlite = sqlite_store or SQLiteStore(self.paths.sqlite_path)
         self.lance = lance_store or LanceStore(self.paths.lancedb_path)
         self.sources = SourceManager(self.sqlite)
-        self.scanner = FileScanner()
+        self.ignore = IgnoreEngine(self.sqlite)
+        self.scanner = FileScanner(self.ignore)
         self.extractors = extractors or self._build_extractor_registry()
         self.chunker = TextChunker()
         self.embeddings = embeddings or self._build_embedding_provider()
@@ -133,6 +136,90 @@ class OpenMindEngine:
     def list_sources(self) -> list[Source]:
         self.init()
         return self.sources.list()
+
+    def list_ignore_rules(self) -> list[IgnoreRule]:
+        self.init()
+        return self.ignore.list_rules()
+
+    def add_ignore_rule(
+        self,
+        rule_type: str,
+        value: str,
+        *,
+        enabled: bool = True,
+        scope: str = "global",
+        source_id: str | None = None,
+        reason: str | None = None,
+    ) -> IgnoreRule:
+        self.init()
+        rule = self.ignore.add_rule(
+            rule_type,
+            value,
+            enabled=enabled,
+            scope=scope,
+            source_id=source_id,
+            reason=reason,
+        )
+        affected = self._remove_ignored_memory() if rule.enabled else 0
+        self._log(
+            "ignore_rule.add",
+            "Added ignore rule",
+            rule_id=rule.id,
+            rule_type=rule.type,
+            value=rule.value,
+            scope=rule.scope,
+            source_id=rule.source_id,
+            affected_files=affected,
+        )
+        return rule
+
+    def update_ignore_rule(self, rule_id: str, **changes) -> IgnoreRule:
+        self.init()
+        rule = self.ignore.update_rule(rule_id, **changes)
+        affected = self._remove_ignored_memory() if rule.enabled else 0
+        self._log(
+            "ignore_rule.update",
+            "Updated ignore rule",
+            rule_id=rule.id,
+            enabled=rule.enabled,
+            affected_files=affected,
+        )
+        return rule
+
+    def remove_ignore_rule(self, rule_id: str) -> IgnoreRule:
+        self.init()
+        rule = self.ignore.remove_rule(rule_id)
+        self._log("ignore_rule.remove", "Removed ignore rule", rule_id=rule.id)
+        return rule
+
+    def test_ignore_path(
+        self,
+        path: str,
+        *,
+        source_id: str | None = None,
+        size: int | None = None,
+    ) -> IgnoreDecision:
+        self.init()
+        metadata = {"size": size} if size is not None else None
+        return self.ignore.should_ignore(path, source_id=source_id, metadata=metadata)
+
+    def _remove_ignored_memory(self) -> int:
+        affected = 0
+        for record in self.sqlite.list_files():
+            decision = self.ignore.should_ignore(
+                record.path,
+                source_id=record.source_id,
+                metadata={"size": record.size},
+            )
+            if not decision.ignored:
+                continue
+            self.lance.delete_file_chunks(record.id)
+            record.status = "skipped"
+            record.error = decision.reason or "Ignored by indexing rule"
+            record.indexed_at = None
+            self.sqlite.upsert_file_if_source_enabled(record)
+            affected += 1
+        return affected
 
     def remove_source(self, source_id: str) -> SourceRemovalResult | None:
         self.init()
@@ -719,6 +806,14 @@ class OpenMindEngine:
         if not self.sqlite.source_is_enabled(file_record.source_id):
             summary.files_skipped += 1
             return summary
+        decision = self.ignore.should_ignore(
+            file_record.path,
+            source_id=file_record.source_id,
+            metadata={"size": file_record.size},
+            refresh=True,
+        )
+        if decision.ignored:
+            return self._skip_ignored_file(file_record, decision, summary)
         existing = self.sqlite.file_by_path(file_record.path)
         if existing and existing.status == "indexed":
             if _same_file_metadata(existing, file_record):
@@ -760,6 +855,14 @@ class OpenMindEngine:
             )
             chunks = self.chunker.chunk(document, file_record)
             vectors = self.embeddings.embed([chunk.text for chunk in chunks])
+            decision = self.ignore.should_ignore(
+                file_record.path,
+                source_id=file_record.source_id,
+                metadata={"size": file_record.size},
+                refresh=True,
+            )
+            if decision.ignored:
+                return self._skip_ignored_file(file_record, decision, summary)
             self.lance.delete_file_chunks(file_record.id)
             self.lance.add_chunks(chunks, vectors)
 
@@ -777,6 +880,28 @@ class OpenMindEngine:
             file_record.error = str(exc)
             self.sqlite.upsert_file_if_source_enabled(file_record)
             summary.errors += 1
+        return summary
+
+    def _skip_ignored_file(
+        self,
+        file_record,
+        decision: IgnoreDecision,
+        summary: IndexSummary,
+    ) -> IndexSummary:
+        self.lance.delete_file_chunks(file_record.id)
+        file_record.status = "skipped"
+        file_record.indexed_at = None
+        file_record.error = decision.reason or "Ignored by indexing rule"
+        self.sqlite.upsert_file_if_source_enabled(file_record)
+        summary.files_skipped += 1
+        self._log(
+            "index.file.ignored",
+            "Skipped file matched an ignore rule",
+            path=file_record.path,
+            rule_id=decision.rule_id,
+            rule_type=decision.rule_type,
+            rule_value=decision.rule_value,
+        )
         return summary
 
     def _is_stale_pending_job(self, job: IndexJob) -> bool:

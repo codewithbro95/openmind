@@ -51,6 +51,7 @@ class WatchEventHandler(FileSystemEventHandler):
             normalized,
             self.root,
             self.supported_extensions,
+            source_id=self.source.id,
         ):
             return
         event = FileChangeEvent(

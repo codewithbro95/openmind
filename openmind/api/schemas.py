@@ -7,6 +7,17 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 QueryText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
 ModelKey = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
 ChatSessionId = Annotated[str, StringConstraints(pattern=r"^chat_[0-9a-f]{16}$")]
+IgnoreRuleTypeValue = Literal[
+    "path",
+    "folder_name",
+    "file_name",
+    "extension",
+    "pattern",
+    "source_type",
+    "max_file_size",
+    "hidden_files",
+]
+IgnoreRuleScopeValue = Literal["global", "source"]
 
 
 class ApiSchema(BaseModel):
@@ -133,6 +144,70 @@ class SourceRemovalResponse(ApiSchema):
     files_removed: int
     chunks_removed: int
     user_files_deleted: bool = False
+
+
+class IgnoreRuleCreateRequest(ApiSchema):
+    type: IgnoreRuleTypeValue
+    value: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4096)]
+    enabled: bool = True
+    scope: IgnoreRuleScopeValue = "global"
+    source_id: str | None = Field(default=None, max_length=64)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class IgnoreRuleUpdateRequest(ApiSchema):
+    type: IgnoreRuleTypeValue | None = None
+    value: Annotated[
+        str | None,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=4096),
+    ] = None
+    enabled: bool | None = None
+    scope: IgnoreRuleScopeValue | None = None
+    source_id: str | None = Field(default=None, max_length=64)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class IgnoreRuleResponse(ApiSchema):
+    id: str
+    type: IgnoreRuleTypeValue
+    value: str
+    enabled: bool
+    scope: IgnoreRuleScopeValue
+    source_id: str | None
+    reason: str | None
+    is_system: bool
+    created_at: str
+    updated_at: str
+
+
+class IgnoreRuleListResponse(ApiSchema):
+    rules: list[IgnoreRuleResponse]
+
+
+class IgnoreRuleDeleteResponse(ApiSchema):
+    deleted: bool
+    rule_id: str
+
+
+class IgnoreRuleTestRequest(ApiSchema):
+    path: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=4096),
+    ]
+    source_id: str | None = Field(default=None, max_length=64)
+    size: int | None = Field(default=None, ge=0)
+
+
+class IgnoreRuleMatchResponse(ApiSchema):
+    id: str
+    type: IgnoreRuleTypeValue
+    value: str
+    reason: str | None
+
+
+class IgnoreRuleTestResponse(ApiSchema):
+    ignored: bool
+    matched_rule: IgnoreRuleMatchResponse | None = None
 
 
 class IndexJobResponse(ApiSchema):
