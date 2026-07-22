@@ -82,7 +82,6 @@ Supported indexed formats:
 - `.pdf`
 - `.docx`
 - `.csv`
-- `.html`
 - `.png`
 - `.jpg`
 - `.jpeg`
@@ -91,7 +90,9 @@ Supported indexed formats:
 - `.tif`
 - `.tiff`
 
-OpenMind is document-first by default. Source code, JSON config, package metadata, app asset catalogs, and other low-level project internals are not indexed unless a future opt-in mode is added.
+OpenMind is document-first. Source code, HTML, JSON config, package metadata, app asset catalogs, and other low-level project internals are not supported indexed formats. Markdown remains the supported format for high-level project documentation.
+
+OpenMind removes stale indexed memory for unsupported formats during startup without deleting or modifying the original files.
 
 Image files are indexed by generating text descriptions through a local vision model endpoint and embedding that text like any other document chunk.
 
@@ -258,8 +259,7 @@ Image files are indexed by generating text descriptions through a local vision m
 ### Test Data
 
 - `data/` folder with local indexing fixtures.
-- Includes text, Markdown, JSON, CSV, HTML, JavaScript, PDF, PNG, and JPEG samples.
-- Supported document-first formats, PDFs, PNGs, and JPEGs can be indexed.
+- Includes supported document and image samples plus source/config fixtures that verify excluded formats stay unindexed.
 
 ## Known Limits
 

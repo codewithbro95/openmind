@@ -196,6 +196,27 @@ class SQLiteStore:
             return None
         return self._file_from_row(row)
 
+    def files_with_unsupported_extensions(
+        self,
+        supported_extensions: set[str],
+    ) -> list[FileRecord]:
+        normalized = sorted(extension.lower() for extension in supported_extensions)
+        with self.connect() as conn:
+            if normalized:
+                placeholders = ", ".join("?" for _ in normalized)
+                rows = conn.execute(
+                    f"SELECT * FROM files WHERE lower(extension) NOT IN ({placeholders})",
+                    normalized,
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM files").fetchall()
+        return [self._file_from_row(row) for row in rows]
+
+    def delete_file(self, file_id: str) -> bool:
+        with self.connect() as conn:
+            result = conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
+            return result.rowcount > 0
+
     def upsert_file(self, record: FileRecord) -> None:
         with self.connect() as conn:
             self._upsert_file(conn, record)

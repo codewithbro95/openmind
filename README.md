@@ -535,7 +535,6 @@ OpenMind indexes:
 .pdf
 .docx
 .csv
-.html
 .png
 .jpg
 .jpeg
@@ -545,7 +544,7 @@ OpenMind indexes:
 .tiff
 ```
 
-OpenMind is document-first by default. It does not index source code, JSON config files, package metadata, app asset catalogs, or other low-level project internals unless a dedicated indexing mode is enabled. High-level project documents such as `README.md`, Markdown notes, PDFs, DOCX files, CSVs, and HTML docs can still be indexed.
+OpenMind is document-first. It does not support indexing source code, HTML, JSON config files, package metadata, app asset catalogs, or other low-level project internals. High-level project documents such as `README.md`, Markdown notes, PDFs, DOCX files, and CSVs can still be indexed.
 
 PDF extraction first uses the normal embedded text layer. If a PDF looks scanned or the extracted text is too sparse, OpenMind automatically tries local OCR with RapidOCR + ONNX Runtime and then continues the normal indexing pipeline.
 

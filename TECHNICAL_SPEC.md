@@ -54,9 +54,7 @@ openmind-core/
 │   │   ├── ocr.py
 │   │   ├── image.py
 │   │   ├── docx.py
-│   │   ├── code.py
 │   │   ├── tabular.py
-│   │   └── html.py
 │   ├── ingestion/
 │   │   ├── normalizer.py
 │   │   └── chunker.py
@@ -102,7 +100,6 @@ Runtime:
 - `pillow`
 - `rapidocr-onnxruntime`
 - `python-docx`
-- `beautifulsoup4`
 - `pandas`
 
 Development:
@@ -582,7 +579,9 @@ OpenMind should tell the user when unchanged files are already indexed and acces
 
 Discovery should be metadata-first. It should not compute content hashes for every discovered file before indexing starts, because that makes large folders appear stuck and wastes work for unchanged files.
 
-Default scanning is document-first plus supported images. OpenMind should index human-facing files such as `.txt`, `.md`, `.pdf`, `.docx`, `.csv`, `.html`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tif`, and `.tiff`. It should not index source code, JSON config/package files, generated build artifacts, app asset catalogs such as `Assets.xcassets`, dependency folders, or other low-level project internals unless a future opt-in code indexing mode is added.
+Default scanning is document-first plus supported images. OpenMind should index human-facing files such as `.txt`, `.md`, `.pdf`, `.docx`, `.csv`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tif`, and `.tiff`. It does not support indexing source code, HTML, JSON config/package files, generated build artifacts, app asset catalogs such as `Assets.xcassets`, dependency folders, or other low-level project internals. Markdown is the supported format for high-level project documentation.
+
+During initialization, OpenMind removes SQLite file records and LanceDB chunks for extensions that are no longer supported. This cleanup affects OpenMind-owned index data only and never deletes or modifies source files.
 
 ## Search Flow
 

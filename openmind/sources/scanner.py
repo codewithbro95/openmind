@@ -11,7 +11,6 @@ SUPPORTED_EXTENSIONS = {
     ".pdf",
     ".docx",
     ".csv",
-    ".html",
     ".png",
     ".jpg",
     ".jpeg",
@@ -89,7 +88,7 @@ class FileScanner:
         for part in relative_parts:
             if part in IGNORED_DIRS:
                 return True
-            if part.startswith(".") and part not in {".html"}:
+            if part.startswith("."):
                 return True
         return False
 

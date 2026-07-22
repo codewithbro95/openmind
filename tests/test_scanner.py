@@ -6,6 +6,7 @@ def test_scanner_finds_supported_files_and_ignores_noisy_dirs(tmp_path):
     (tmp_path / "notes.md").write_text("Holiday plan", encoding="utf-8")
     (tmp_path / "script.py").write_text("print('project code')", encoding="utf-8")
     (tmp_path / "config.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "page.html").write_text("<h1>Project page</h1>", encoding="utf-8")
     (tmp_path / "image.png").write_text("image bytes placeholder", encoding="utf-8")
     (tmp_path / "node_modules").mkdir()
     (tmp_path / "node_modules" / "package.json").write_text("{}", encoding="utf-8")
@@ -28,7 +29,7 @@ def test_scanner_finds_supported_files_and_ignores_noisy_dirs(tmp_path):
     assert notes.content_hash
 
 
-def test_scanner_skips_project_internals_but_keeps_high_level_docs(tmp_path):
+def test_scanner_skips_project_internals_but_keeps_markdown_docs(tmp_path):
     project = tmp_path / "playground.swiftpm"
     asset_dir = project / "Assets.xcassets" / "AccentColor.colorset"
     asset_dir.mkdir(parents=True)
@@ -46,7 +47,7 @@ def test_scanner_skips_project_internals_but_keeps_high_level_docs(tmp_path):
 
     records = FileScanner().scan(source)
 
-    assert sorted(record.name for record in records) == ["README.md", "docs.html"]
+    assert [record.name for record in records] == ["README.md"]
 
 
 def test_scanner_can_scan_metadata_without_hashing_content(tmp_path):

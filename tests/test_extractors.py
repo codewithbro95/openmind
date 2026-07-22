@@ -1,8 +1,16 @@
 from openmind.core.config import OCRSettings
+from openmind.extractors import default_registry
 from openmind.extractors.image import ImageExtractor
 from openmind.extractors.pdf import PDFExtractor, _needs_ocr
 from openmind.extractors.text import MarkdownExtractor, TextExtractor
 from openmind.ingestion.normalizer import normalize_text
+
+
+def test_default_registry_supports_documents_but_not_code_or_html():
+    extensions = default_registry().supported_extensions
+
+    assert extensions == {".txt", ".md", ".pdf", ".docx", ".csv"}
+    assert extensions.isdisjoint({".py", ".js", ".ts", ".json", ".html"})
 
 
 class FakePDFPage:

@@ -56,6 +56,8 @@ class OpenMindEngine:
     ):
         self.paths = paths or AppPaths.from_env()
         self._config_lock = threading.RLock()
+        self._maintenance_lock = threading.Lock()
+        self._unsupported_cleanup_complete = False
         self._chat_sessions_lock = threading.RLock()
         self._chat_sessions: dict[str, ChatSession] = {}
         self.config, self._config_fingerprint = self._read_config_snapshot()
@@ -73,6 +75,7 @@ class OpenMindEngine:
         self.sqlite.initialize()
         self.lance.initialize()
         self._cleanup_orphaned_source_data()
+        self._cleanup_unsupported_file_data_once()
         return self.paths
 
     def reload_config(self) -> OpenMindConfig:
@@ -186,6 +189,26 @@ class OpenMindEngine:
                 files_removed=files_removed,
                 chunks_removed=chunks_removed,
             )
+
+    def _cleanup_unsupported_file_data_once(self) -> None:
+        if self._unsupported_cleanup_complete:
+            return
+        with self._maintenance_lock:
+            if self._unsupported_cleanup_complete:
+                return
+            supported = SUPPORTED_EXTENSIONS & self.extractors.supported_extensions
+            records = self.sqlite.files_with_unsupported_extensions(supported)
+            for record in records:
+                self.lance.delete_file_chunks(record.id)
+                self.sqlite.delete_file(record.id)
+                self._log(
+                    "file.cleanup_unsupported",
+                    "Removed indexed memory for an unsupported file type",
+                    file_id=record.id,
+                    path=record.path,
+                    extension=record.extension,
+                )
+            self._unsupported_cleanup_complete = True
 
     def index(self) -> IndexSummary:
         self.init()

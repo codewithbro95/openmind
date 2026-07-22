@@ -5,6 +5,7 @@ User-facing changes for each OpenMind Core release.
 ## Unreleased
 
 - Each chat message now retrieves fresh context for its own question, including when the topic changes during a session.
+- Source code, HTML, and JSON are no longer available through the indexing pipeline; existing indexed memory for those formats is removed without touching the original files.
 
 ## 0.0.6 - 2026-07-19
 
