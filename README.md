@@ -556,44 +556,20 @@ Why uv:
 
 ## Supported Files
 
-OpenMind indexes:
+OpenMind is document-first and supports common text documents, Markdown, PDFs, Word documents, CSV files, and images. It does not index source code, HTML, JSON configuration, package metadata, app asset catalogs, or other low-level project internals.
 
-```text
-.txt
-.md
-.pdf
-.docx
-.csv
-.png
-.jpg
-.jpeg
-.webp
-.bmp
-.tif
-.tiff
+As of [v0.0.7](https://github.com/codewithbro95/openmind/releases/tag/v0.0.7), you control which eligible files become part of local memory through `ignore rules`. Rules can exclude extensions, file categories, paths, patterns, large files, and more, either everywhere or within one source.
+
+```bash
+openmind ignore list
+openmind ignore add extension .csv
+openmind ignore add source-type image
+openmind ignore test ~/Documents/example.pdf
 ```
 
-OpenMind is document-first. It does not support indexing source code, HTML, JSON config files, package metadata, app asset catalogs, or other low-level project internals. High-level project documents such as `README.md`, Markdown notes, PDFs, DOCX files, and CSVs can still be indexed.
+Client applications can manage the same rules through the authenticated `/api/v1/ignore-rules` API. The CLI and API use the same underlying engine, so changes apply consistently to normal indexing and Watch Mode. See [Ignore Rules](#ignore-rules) for the complete guide.
 
 PDF extraction first uses the normal embedded text layer. If a PDF looks scanned or the extracted text is too sparse, OpenMind automatically tries local OCR with RapidOCR + ONNX Runtime and then continues the normal indexing pipeline.
-
-It ignores noisy folders such as:
-
-```text
-.git
-node_modules
-venv
-.venv
-.env
-__pycache__
-dist
-build
-.cache
-target
-coverage
-Assets.xcassets
-hidden folders
-```
 
 ## Image Indexing
 
