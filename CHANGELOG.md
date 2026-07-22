@@ -4,6 +4,7 @@ User-facing changes for each OpenMind Core release.
 
 ## Unreleased
 
+- Added background watch mode to keep enabled source folders synchronized after files are created, changed, moved, or deleted, with shared CLI and local API controls.
 - Each chat message now retrieves fresh context for its own question, including when the topic changes during a session.
 - Source code, HTML, and JSON are no longer available through the indexing pipeline; existing indexed memory for those formats is removed without touching the original files.
 

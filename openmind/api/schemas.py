@@ -30,6 +30,18 @@ class StatusResponse(ApiSchema):
     indexed_chunks: int
     indexing_state: str
     last_index_job_status: str | None
+    watcher_state: str
+    queued_watch_jobs: int
+
+
+class WatchStatusResponse(ApiSchema):
+    state: str
+    sources: list[str]
+    queued_jobs: int
+    current_file: str | None
+    last_event_at: str | None
+    last_indexed_at: str | None
+    errors: list[str]
 
 
 class ProviderStatusResponse(ApiSchema):

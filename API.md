@@ -91,12 +91,28 @@ curl http://127.0.0.1:8765/api/v1/search \
 | `POST` | `/api/v1/index/pause` | Request indexing pause |
 | `POST` | `/api/v1/index/resume` | Resume paused indexing |
 | `POST` | `/api/v1/index/stop` | Request indexing stop |
+| `POST` | `/api/v1/watch/start` | Start source-folder synchronization |
+| `GET` | `/api/v1/watch/status` | Read watcher state and recent activity |
+| `POST` | `/api/v1/watch/stop` | Request watcher shutdown |
 | `POST` | `/api/v1/search` | Search indexed local memory |
 | `POST` | `/api/v1/ask` | Return an answer with structured sources |
 | `POST` | `/api/v1/ask/stream` | Stream answer text as server-sent events |
 | `DELETE` | `/api/v1/chat/sessions/{session_id}` | End an in-memory chat session |
 | `GET` | `/api/v1/documents/{file_id}` | Inspect an indexed file and its text chunks |
 | `POST` | `/api/v1/actions/open` | Open a validated indexed file in its default OS app |
+
+## Watch mode
+
+Start the local watcher after sources have been added:
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/v1/watch/start \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+The API and CLI use the same watcher service and shared SQLite state. Starting through either interface creates one detached local worker that remains active after the launching client or terminal exits. Repeated start requests return the current active watcher instead of creating duplicates. Status includes watched source paths, queued jobs, the current file, latest event and indexing timestamps, and recent file errors. Stop requests are cooperative and take effect after the current file operation finishes.
+
+The watcher only observes enabled sources already approved through OpenMind. It does not modify or delete user files; a deleted source file only causes its OpenMind metadata and searchable chunks to be removed.
 
 ## Sources
 
@@ -109,7 +125,7 @@ Add a folder:
 }
 ```
 
-OpenMind resolves the path and rejects missing files, non-directory paths, and duplicate sources. Removing a source also removes its file records and searchable chunks from OpenMind, but never deletes the original folder or files. Source removal returns the number of file records and memory chunks removed and is refused while an indexing job is active.
+OpenMind resolves the path and rejects missing files, non-directory paths, and duplicate sources. Removing a source also removes its file records and searchable chunks from OpenMind, but never deletes the original folder or files. Source removal returns the number of file records and memory chunks removed and is refused while indexing or watch mode is active.
 
 ```json
 {

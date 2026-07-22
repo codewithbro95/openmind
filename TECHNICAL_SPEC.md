@@ -38,6 +38,7 @@ openmind-core/
 │   │       ├── models.py
 │   │       ├── sources.py
 │   │       ├── indexing.py
+│   │       ├── watching.py
 │   │       ├── memory.py
 │   │       └── actions.py
 │   ├── core/
@@ -74,6 +75,13 @@ openmind-core/
 │   ├── retrieval/
 │   │   ├── search.py
 │   │   └── context.py
+│   ├── watcher/
+│   │   ├── service.py
+│   │   ├── events.py
+│   │   ├── handler.py
+│   │   ├── debounce.py
+│   │   ├── errors.py
+│   │   └── state.py
 │   └── llm/
 │       └── answer.py
 ├── tests/
@@ -101,6 +109,7 @@ Runtime:
 - `rapidocr-onnxruntime`
 - `python-docx`
 - `pandas`
+- `watchdog`
 
 Development:
 
@@ -128,9 +137,6 @@ uv sync --all-extras
 
 Later, not included yet:
 
-- `fastapi`
-- `uvicorn`
-- `watchdog`
 - `llama-cpp-python`
 - `ollama`
 
@@ -220,6 +226,43 @@ CREATE TABLE index_jobs (
 );
 ```
 
+### `watch_state`
+
+```sql
+CREATE TABLE watch_state (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  started_at TEXT,
+  stopped_at TEXT,
+  updated_at TEXT,
+  pid INTEGER,
+  error TEXT,
+  current_file TEXT,
+  last_event_at TEXT,
+  last_indexed_at TEXT,
+  sources_json TEXT NOT NULL DEFAULT '[]'
+);
+```
+
+### `watch_jobs`
+
+```sql
+CREATE TABLE watch_jobs (
+  id TEXT PRIMARY KEY,
+  job_type TEXT NOT NULL,
+  path TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT
+);
+```
+
 ## LanceDB Schema
 
 Table: `chunks`
@@ -255,6 +298,9 @@ openmind index status
 openmind index pause
 openmind index resume
 openmind index stop
+openmind watch
+openmind watch status
+openmind watch stop
 openmind models list
 openmind models load
 openmind models update
@@ -653,6 +699,29 @@ processed_files / total_files * 100
 ```
 
 No Celery, Redis, external queue, or daemon manager is included.
+
+## Watch Mode
+
+`openmind watch` starts a detached local worker that keeps enabled, user-approved sources synchronized after the launching terminal exits. The worker first performs a metadata-only catch-up scan, then schedules a recursive watchdog observer for each available source.
+
+The live event flow is:
+
+```text
+watchdog event -> normalize and filter -> debounce by path -> SQLite job -> worker -> SQLite + LanceDB
+```
+
+Filesystem callbacks never extract or embed content. They use the scanner's shared extension and ignore rules, then replace any pending job for the same path. Deletes have higher queue priority than indexing work. Before reading a created or modified file, the worker requires two consecutive size and modified-time snapshots to match.
+
+Job behavior:
+
+- `index_file`: index a newly discovered supported file.
+- `reindex_file`: run normal incremental indexing for a changed file and replace stale chunks when content changed.
+- `delete_file`: remove the file record from SQLite and all associated chunks from LanceDB.
+- A move is represented as `delete_file` for the old path plus `index_file` for the destination.
+
+`watch_state` stores lifecycle, process, current-file, source, and activity timestamps. `watch_jobs` stores durable pending, processing, completed, and failed file synchronization work. Processing jobs left by an interrupted watcher return to pending on the next start. A failed file is recorded and does not terminate the loop.
+
+CLI and API start operations call the same engine method, which starts at most one worker and redirects its standard output and error to `~/.openmind/logs/watch.log`. Structured watcher lifecycle, event, queue, processing, and error records are written to `~/.openmind/logs/openmind.log` and can be followed with `openmind dev logs --log watch`. `openmind watch status` and the API status endpoint read the same SQLite state. Stop operations write `stop_requested`, which the worker observes between jobs. There is no automatic login service or general daemon manager, so watch mode must be started again after a machine reboot or unexpected process termination.
 
 ## LM Studio Failure Handling
 

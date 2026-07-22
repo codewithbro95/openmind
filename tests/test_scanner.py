@@ -81,3 +81,36 @@ def test_scanner_can_be_limited_to_available_extractors(tmp_path):
     records = FileScanner().scan(source, supported_extensions={".md"})
 
     assert [record.name for record in records] == ["notes.md"]
+
+
+def test_scanner_ignores_temporary_sensitive_and_hidden_paths(tmp_path):
+    (tmp_path / "notes.md").write_text("Keep this", encoding="utf-8")
+    for name in (
+        ".env",
+        ".DS_Store",
+        "Thumbs.db",
+        "secret.pem",
+        "secret.key",
+        "identity.p12",
+        "id_rsa",
+        "download.part",
+        "download.crdownload",
+        "notes.md.swp",
+        "state.sqlite",
+        "~$draft.docx",
+    ):
+        (tmp_path / name).write_text("ignore", encoding="utf-8")
+    hidden = tmp_path / ".private"
+    hidden.mkdir()
+    (hidden / "notes.md").write_text("ignore", encoding="utf-8")
+    source = Source(
+        id="src_1",
+        path=str(tmp_path),
+        recursive=True,
+        enabled=True,
+        created_at="2026-01-01T00:00:00+00:00",
+    )
+
+    records = FileScanner().scan(source)
+
+    assert [record.name for record in records] == ["notes.md"]

@@ -42,6 +42,7 @@ from openmind.sources.manager import SourceManager
 from openmind.sources.scanner import SUPPORTED_EXTENSIONS, FileScanner
 from openmind.storage.lance_store import LanceStore
 from openmind.storage.sqlite_store import SQLiteStore, utc_now
+from openmind.watcher.state import WatchStatus
 
 
 class OpenMindEngine:
@@ -148,6 +149,16 @@ class OpenMindEngine:
             raise SourceRemovalBlockedError(
                 f"Cannot remove a source while indexing job {active.id} is {active.status}. "
                 "Stop indexing first with: openmind index stop"
+            )
+        watch_state = self.sqlite.get_watch_state()
+        if watch_state is not None and watch_state.status in {
+            "starting",
+            "running",
+            "stop_requested",
+        }:
+            raise SourceRemovalBlockedError(
+                "Cannot remove a source while watch mode is active. "
+                "Stop it first with: openmind watch stop"
             )
 
         source = self.sources.get(source_id)
@@ -586,6 +597,26 @@ class OpenMindEngine:
     def status(self) -> StatusSummary:
         self.init()
         return self.sqlite.status(app_home=str(self.paths.home))
+
+    def run_watch(self) -> None:
+        from openmind.watcher.service import WatchService
+
+        WatchService(self).run()
+
+    def start_watch(self) -> WatchStatus:
+        from openmind.watcher.service import WatchService
+
+        return WatchService(self).start_background()
+
+    def watch_status(self) -> WatchStatus:
+        from openmind.watcher.service import WatchService
+
+        return WatchService(self).status()
+
+    def stop_watch(self) -> WatchStatus:
+        from openmind.watcher.service import WatchService
+
+        return WatchService(self).stop()
 
     def lmstudio_client(self, config: OpenMindConfig | None = None) -> LMStudioClient:
         selected_config = config or self.config

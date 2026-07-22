@@ -39,6 +39,7 @@ dependencies = [
   "pypdfium2>=5.11.0",
   "pillow>=12.3.0",
   "rapidocr-onnxruntime>=1.4.4",
+  "watchdog>=6.0,<7",
 ]
 
 [project.optional-dependencies]

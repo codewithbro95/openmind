@@ -25,6 +25,7 @@ def health() -> HealthResponse:
 def status(engine: EngineDependency) -> StatusResponse:
     summary = engine.status()
     job = engine.index_job_status()
+    watcher = engine.watch_status()
     active_states = {"pending", "discovering", "running", "pause_requested", "paused"}
     indexing_state = job.status if job and job.status in active_states else "idle"
     image_model = (
@@ -42,6 +43,8 @@ def status(engine: EngineDependency) -> StatusResponse:
         indexed_chunks=engine.lance.count_chunks(),
         indexing_state=indexing_state,
         last_index_job_status=job.status if job else None,
+        watcher_state=watcher.state,
+        queued_watch_jobs=watcher.queued_jobs,
     )
 
 

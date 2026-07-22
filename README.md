@@ -225,6 +225,16 @@ If an unchanged file was indexed before, OpenMind reports it as already indexed 
 
 OpenMind uses file path, size, modified time, and content hash to avoid unnecessary work. Unchanged files are not extracted, embedded, or stored again. If a file's metadata changes, OpenMind checks the content hash and only re-indexes when the content actually changed.
 
+Watch mode:
+
+```bash
+openmind watch
+openmind watch status
+openmind watch stop
+```
+
+`openmind watch` starts a detached local worker and returns control to the terminal. The worker keeps enabled source folders synchronized until `openmind watch stop` is run. New and changed files are indexed after a short debounce and stability check; deleted files are removed from SQLite and LanceDB without touching any user files.
+
 Search:
 
 ```bash
@@ -737,6 +747,28 @@ The live table shows:
 
 Pause and stop take effect after the current file finishes. If a file is already inside a slow extraction or embedding request, the worker checks the requested state before moving to the next file.
 
+## Watch Mode
+
+Start a background worker that runs a catch-up scan, then monitors every enabled and available source folder:
+
+```bash
+openmind watch
+```
+
+Check state, queued changes, the current file, recent activity, and errors:
+
+```bash
+openmind watch status
+```
+
+Stop the watcher:
+
+```bash
+openmind watch stop
+```
+
+The worker is detached from the launching terminal, so closing the terminal does not stop it. CLI and API start, status, and stop operations use the same watcher service and SQLite state. Watch mode uses the same supported formats and ignore rules as regular indexing. Files created or modified in quick succession are debounced, and OpenMind waits for a file's size and modified time to stabilize before reading it. A failure is recorded for that file while the watcher continues processing later changes.
+
 ## Logs
 
 OpenMind writes structured logs to:
@@ -773,6 +805,12 @@ Watch only index worker logs:
 
 ```bash
 openmind dev logs --log index
+```
+
+Watch only detached watch-worker output:
+
+```bash
+openmind dev logs --log watch
 ```
 
 Watch LM Studio logs through its CLI:

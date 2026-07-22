@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 import sqlite3
+import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterator
 
 from openmind.core.models import FileRecord, IndexJob, Source, StatusSummary
+from openmind.watcher.state import WatchJob, WatchState
 
 
 def utc_now() -> str:
@@ -81,6 +84,39 @@ class SQLiteStore:
                   completed_at TEXT,
                   updated_at TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS watch_state (
+                  id TEXT PRIMARY KEY,
+                  status TEXT NOT NULL,
+                  started_at TEXT,
+                  stopped_at TEXT,
+                  updated_at TEXT,
+                  pid INTEGER,
+                  error TEXT,
+                  current_file TEXT,
+                  last_event_at TEXT,
+                  last_indexed_at TEXT,
+                  sources_json TEXT NOT NULL DEFAULT '[]'
+                );
+
+                CREATE TABLE IF NOT EXISTS watch_jobs (
+                  id TEXT PRIMARY KEY,
+                  job_type TEXT NOT NULL,
+                  path TEXT NOT NULL,
+                  source_id TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  priority INTEGER NOT NULL DEFAULT 0,
+                  attempts INTEGER NOT NULL DEFAULT 0,
+                  error TEXT,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  started_at TEXT,
+                  completed_at TEXT,
+                  FOREIGN KEY(source_id) REFERENCES sources(id)
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS watch_jobs_one_pending_path
+                ON watch_jobs(path) WHERE status = 'pending';
                 """
             )
             self._ensure_column(conn, "index_jobs", "already_indexed_files", "INTEGER DEFAULT 0")
@@ -196,6 +232,14 @@ class SQLiteStore:
             return None
         return self._file_from_row(row)
 
+    def files_for_source(self, source_id: str) -> list[FileRecord]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM files WHERE source_id = ? ORDER BY path ASC",
+                (source_id,),
+            ).fetchall()
+        return [self._file_from_row(row) for row in rows]
+
     def files_with_unsupported_extensions(
         self,
         supported_extensions: set[str],
@@ -261,6 +305,7 @@ class SQLiteStore:
                 ).fetchone()[0],
                 "index_jobs": conn.execute("SELECT COUNT(*) FROM index_jobs").fetchone()[0],
                 "index_runs": conn.execute("SELECT COUNT(*) FROM index_runs").fetchone()[0],
+                "watch_jobs": conn.execute("SELECT COUNT(*) FROM watch_jobs").fetchone()[0],
             }
 
     def flush_index_state(self, include_sources: bool = False) -> dict[str, int]:
@@ -269,6 +314,8 @@ class SQLiteStore:
             conn.execute("DELETE FROM files")
             conn.execute("DELETE FROM index_jobs")
             conn.execute("DELETE FROM index_runs")
+            conn.execute("DELETE FROM watch_jobs")
+            conn.execute("DELETE FROM watch_state")
             if include_sources:
                 conn.execute("DELETE FROM sources")
         return counts
@@ -350,6 +397,159 @@ class SQLiteStore:
         if row is None:
             return None
         return self._job_from_row(row)
+
+    def get_watch_state(self) -> WatchState | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM watch_state WHERE id = 'watcher'").fetchone()
+        return self._watch_state_from_row(row) if row is not None else None
+
+    def update_watch_state(self, **updates: object) -> WatchState:
+        allowed = {
+            "status",
+            "started_at",
+            "stopped_at",
+            "pid",
+            "error",
+            "current_file",
+            "last_event_at",
+            "last_indexed_at",
+            "sources_json",
+        }
+        unknown = set(updates) - allowed
+        if unknown:
+            raise ValueError(f"Unknown watch state fields: {', '.join(sorted(unknown))}")
+        updates["updated_at"] = utc_now()
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO watch_state (id, status, updated_at) VALUES ('watcher', 'stopped', ?)",
+                (updates["updated_at"],),
+            )
+            assignments = ", ".join(f"{key} = ?" for key in updates)
+            conn.execute(
+                f"UPDATE watch_state SET {assignments} WHERE id = 'watcher'",
+                list(updates.values()),
+            )
+        state = self.get_watch_state()
+        if state is None:
+            raise RuntimeError("Watch state could not be saved.")
+        return state
+
+    def enqueue_watch_job(
+        self,
+        job_type: str,
+        path: str,
+        source_id: str,
+        priority: int = 0,
+    ) -> WatchJob:
+        now = utc_now()
+        job_id = f"watchjob_{uuid.uuid4().hex[:16]}"
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "DELETE FROM watch_jobs WHERE path = ? AND status = 'pending'",
+                (path,),
+            )
+            conn.execute(
+                """
+                INSERT INTO watch_jobs (
+                  id, job_type, path, source_id, status, priority, attempts,
+                  error, created_at, updated_at, started_at, completed_at
+                )
+                VALUES (?, ?, ?, ?, 'pending', ?, 0, NULL, ?, ?, NULL, NULL)
+                """,
+                (job_id, job_type, path, source_id, priority, now, now),
+            )
+            row = conn.execute("SELECT * FROM watch_jobs WHERE id = ?", (job_id,)).fetchone()
+        return self._watch_job_from_row(row)
+
+    def claim_watch_job(self) -> WatchJob | None:
+        now = utc_now()
+        with self.connect() as conn:
+            # stay read-only while the watcher is idle so status and api calls are not blocked.
+            row = conn.execute(
+                """
+                SELECT * FROM watch_jobs
+                WHERE status = 'pending'
+                ORDER BY priority DESC, created_at ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT * FROM watch_jobs
+                WHERE status = 'pending'
+                ORDER BY priority DESC, created_at ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute(
+                """
+                UPDATE watch_jobs
+                SET status = 'processing', attempts = attempts + 1,
+                    started_at = ?, updated_at = ?, error = NULL
+                WHERE id = ?
+                """,
+                (now, now, row["id"]),
+            )
+            claimed = conn.execute(
+                "SELECT * FROM watch_jobs WHERE id = ?",
+                (row["id"],),
+            ).fetchone()
+        return self._watch_job_from_row(claimed)
+
+    def finish_watch_job(self, job_id: str, error: str | None = None) -> WatchJob:
+        now = utc_now()
+        status = "failed" if error else "completed"
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE watch_jobs
+                SET status = ?, error = ?, completed_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (status, error, now, now, job_id),
+            )
+            row = conn.execute("SELECT * FROM watch_jobs WHERE id = ?", (job_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"Unknown watch job: {job_id}")
+        return self._watch_job_from_row(row)
+
+    def recover_processing_watch_jobs(self) -> int:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                UPDATE watch_jobs
+                SET status = 'pending', started_at = NULL, updated_at = ?
+                WHERE status = 'processing'
+                """,
+                (utc_now(),),
+            ).rowcount
+
+    def queued_watch_job_count(self) -> int:
+        with self.connect() as conn:
+            return int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM watch_jobs WHERE status = 'pending'"
+                ).fetchone()[0]
+            )
+
+    def recent_watch_errors(self, limit: int = 5) -> list[str]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT path, error FROM watch_jobs
+                WHERE status = 'failed' AND error IS NOT NULL
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [f"{row['path']}: {row['error']}" for row in rows]
 
     def _file_from_row(self, row: sqlite3.Row) -> FileRecord:
         return FileRecord(
@@ -443,4 +643,39 @@ class SQLiteStore:
             started_at=row["started_at"],
             completed_at=row["completed_at"],
             updated_at=row["updated_at"],
+        )
+
+    def _watch_state_from_row(self, row: sqlite3.Row) -> WatchState:
+        try:
+            sources = json.loads(row["sources_json"] or "[]")
+        except json.JSONDecodeError:
+            sources = []
+        return WatchState(
+            id=row["id"],
+            status=row["status"],
+            started_at=row["started_at"],
+            stopped_at=row["stopped_at"],
+            updated_at=row["updated_at"],
+            pid=row["pid"],
+            error=row["error"],
+            current_file=row["current_file"],
+            last_event_at=row["last_event_at"],
+            last_indexed_at=row["last_indexed_at"],
+            sources=[str(path) for path in sources],
+        )
+
+    def _watch_job_from_row(self, row: sqlite3.Row) -> WatchJob:
+        return WatchJob(
+            id=row["id"],
+            job_type=row["job_type"],
+            path=row["path"],
+            source_id=row["source_id"],
+            status=row["status"],
+            priority=row["priority"],
+            attempts=row["attempts"],
+            error=row["error"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            started_at=row["started_at"],
+            completed_at=row["completed_at"],
         )

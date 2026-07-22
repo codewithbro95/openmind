@@ -104,7 +104,6 @@ Image files are indexed by generating text descriptions through a local vision m
 - Automatic scanned-PDF OCR fallback with local RapidOCR + ONNX Runtime.
 - DOCX extraction with `python-docx`.
 - CSV extraction with `pandas`.
-- HTML extraction with BeautifulSoup.
 - Image description extraction through a local LM Studio vision model.
 - Optional image OCR text extraction with RapidOCR.
 - Searchable image metadata extraction for dimensions, format, EXIF, and safe image info fields.
@@ -219,6 +218,23 @@ Image files are indexed by generating text descriptions through a local vision m
 - Pause/stop take effect after the current file finishes.
 - Progress is capped at `100.0%`.
 
+### Watch Mode
+
+- `openmind watch`
+- `openmind watch status`
+- `openmind watch stop`
+- Runs as a detached local worker until explicitly stopped.
+- CLI and API controls share the same worker lifecycle and SQLite state.
+- Watches enabled, user-approved source folders only.
+- Runs a lightweight catch-up scan before listening for live changes.
+- Uses the cross-platform watchdog backend.
+- Debounces repeated filesystem events and waits for files to stabilize.
+- Queues create, re-index, and delete work in SQLite.
+- Treats a move as deletion of the old path followed by indexing the new path.
+- Removes deleted-file metadata from SQLite and chunks from LanceDB.
+- Records per-file failures and continues processing later changes.
+- Exposes authenticated start, status, and stop controls through the local API.
+
 ### Developer Logs
 
 - Structured OpenMind logs:
@@ -229,6 +245,7 @@ Image files are indexed by generating text descriptions through a local vision m
   - `openmind dev logs`
   - `openmind dev logs --no-follow --lines 40`
   - `openmind dev logs --log all`
+  - `openmind dev logs --log watch`
   - `openmind dev logs --lm-studio`
 - LM Studio log mode runs:
   - `lms log stream`
@@ -267,7 +284,7 @@ Image files are indexed by generating text descriptions through a local vision m
 - Image indexing requires a local vision model served through LM Studio.
 - Default scanned-PDF OCR can be installed through `uv`; optional OCRmyPDF mode still needs local OCRmyPDF, Tesseract, and Ghostscript.
 - No persistent chat history yet.
-- No file watcher yet.
+- Watch mode survives terminal closure but must be restarted after a machine reboot or process termination.
 - No ranking tuning beyond vector search.
 - No hybrid keyword/vector search yet.
 - No UI.
@@ -323,7 +340,6 @@ Image files are indexed by generating text descriptions through a local vision m
 ### Local Service Extensions
 
 - Background worker process management.
-- File watcher for incremental indexing.
 - Optional event stream for indexing progress.
 
 ### Future Providers
